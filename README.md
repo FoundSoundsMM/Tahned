@@ -8,14 +8,6 @@ glyph-based, and reactive to whatever the patch is doing.
 Everything is playable from the norns and the grid alone. The only thing it will
 take from outside is a clock, and that is optional.
 
-> Its design ancestor is the Destiny Plus **Programma 900** — six polytonal
-> voices with odd / even / partials / tilt harmonic controls, four-quadrant
-> multiplication between voices, thirty-two gestural CV buffers, morph inputs,
-> a long regeneration engine, and a physics field of bouncing balls driving
-> modulation. TAHNED is not a clone of it; it takes its stance, that the
-> instrument is a machine for generating harmonic relationships and every
-> control is a macro over a spectrum. See [DESIGN.md](DESIGN.md).
-
 ## The idea
 
 **One integer lattice drives pitch, timbre and time.** A ratio `n/d` is spent
