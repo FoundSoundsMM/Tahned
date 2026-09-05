@@ -16,6 +16,10 @@
 local S = {}
 
 S.NULL_DEST = 88   -- a channel nothing reads
+-- BPM is not on the control bus at all: the engine has no say over the norns
+-- clock. It gets a spare channel so it can sit in the destination list like
+-- any other, and lib/core/lfo.lua runs that LFO in lua instead.
+S.BPM_DEST  = 89
 
 -- the YMF262's eight waveforms, in chip order
 S.WAVES   = {"SIN","HSIN","ASIN","PSIN","ESIN","CAML","SQR","SAW"}
@@ -28,6 +32,9 @@ S.FILTERS = {"LP","BP","HP","COMB"}
 S.LFOWAVE = {"TRI","SIN","SQR","SAW","RMP","EXP","RND","S&H"}
 S.LFOMODE = {"FREE","TRIG","HOLD","ONE"}
 S.LFOMULT = {"x1","x2","x4","x8","x16","x32","x64","x128"}
+-- what a step held over several pulses does with them, after the Metropolis:
+-- sit there, retrigger, or retrigger while walking the level up or down
+S.HTYPE   = {"HOLD","REPEAT","RAMP","FALL"}
 S.MACHINE = {"KICK","SNARE","HAT","TOM","CYMB","TONE"}
 S.DIRS    = {"FWD","REV","PNG","RND","BRN"}
 
@@ -90,6 +97,9 @@ function S.seq(id, name, o)
   s.k, s.id = "seq", id
   s.min, s.max, s.def = o.min or 0, o.max or 127, o.def or 0
   s.opts, s.step = o.opts, o.step or 1
+  -- a lock-only setting has no track-wide value worth turning: it only means
+  -- something written onto a step, so the cell is struck out until one is held
+  s.lockonly = o.lock or false
   if o.opts then s.min, s.max = 0, #o.opts - 1 end
   return s
 end

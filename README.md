@@ -39,19 +39,44 @@ its sound, sequencer settings and pattern are still there when you switch back.
 
 Every track has, in order:
 
-1. **MIX** — machine, level, pan, drive, three sends, width
-2. **SEQ** — length, speed, swing, direction, rotate, probability, ratchet and
-   gate (TONE also gets a **HARMONY** page)
-3. **the machine's own pages** — one for each drum, four for TONE
-4. **FILTER** — type (LP / BP / HP / comb), cutoff, res, envelope, keytrack, drive
-5. **LFO 1–4** — speed, multiplier, wave, mode, and **two destinations each**
+1. **MIX** — machine, level, pan, drive, three sends
+2. **SEQ** — length, speed, time signature, swing, direction, rotate,
+   probability, and ratchet (drums) or strum (TONE)
+3. **STEP** — what one step does with the time it gets: `HOLD` and `HTYPE`,
+   plus a note offset (drums) or the gate length (TONE)
+4. **the machine's own pages** — one for each drum, TONE gets HARMONY plus four
+5. **FILTER** — type (LP / BP / HP / comb), cutoff, res, envelope, keytrack, drive
+6. **LFO 1–4** — speed, multiplier, wave, mode, and **two destinations each**
 
-which is eight pages for a drum and twelve for TONE. COLOUR is not among them
+which is nine pages for a drum and thirteen for TONE. COLOUR is not among them
 any more: it is one chain on the master rather than eight of them a track deep.
+
+There is no per-track **WIDTH**. A mid/side trim over a track that is mostly
+one voice measured something rather than moved it, and it sat where the
+control everybody actually reaches for should be. PAN places the track; the
+image it arrives with is left alone.
 
 Labels are capped at six characters, which is what fits in a 32px cell
 without running into the section beside it. `tools/check-lua.lua` fails if a
 longer one is ever added.
+
+### What a cell draws
+
+Every cell carries a small picture of its value rather than a generic bar, so
+a page reads as a picture of the sound. Two of them are not per cell at all:
+
+- **envelopes are drawn once, across all of their cells.** An envelope
+  generator is one shape, not four unrelated pictures of four numbers, so
+  `ATK DEC SUS REL` share a single curve running the width of the run and each
+  cell simply has part of it passing through. A long attack really does push
+  the decay into the next box. The cursor brightens the segment it is on, not
+  the box. The filter's `ATK DEC` is the same thing two cells wide.
+- **an LFO's `SPD` cell is a scope.** It draws the wave that is actually
+  selected, at the rate `SPD`, `MULT` and the tempo actually give it, scrolling
+  in real time — so the cell answers *how fast, and moving how* rather than
+  showing a number beside a generic sine. The window is a fixed two seconds,
+  so a faster LFO fits more cycles into the same box. It shares its shapes and
+  its rate formula with the engine, so what is drawn is what is running.
 
 ### Macros
 
@@ -92,7 +117,7 @@ switching at runtime, so the three filters you are not using cost nothing.
 |---|---|
 | E1 | select track |
 | E2 | move the cursor across the eight cells |
-| E3 | edit the value under the cursor |
+| E3 | edit the value under the cursor — a lock-only cell only moves while a step is held |
 | K1 | shift |
 | K2 / K3 | page back / forward — **pages do not wrap** |
 | K2 + K3 | master |
@@ -135,8 +160,9 @@ that step. **Hold several and the lock lands on all of them**, so a handful
 of steps can be shaped in one gesture. A locked value is flagged on screen,
 the header counts the pads down, and the lock reverts when the step passes.
 Sequencer settings that mean something on a single step — probability,
-ratchet, gate — lock the same way. While steps are held, **E1** sets
-their velocity, and on TONE the keyboard writes notes onto all of them.
+ratchet, gate, and everything on the STEP page — lock the same way. While
+steps are held, **E1** sets their velocity, and on TONE the keyboard writes
+notes onto all of them.
 
 Writing a lock never pushes it at the engine. The track keeps its own value
 and the change is only heard on the steps that carry it, as they come round,
@@ -144,6 +170,27 @@ so what you hear is always what the sequencer is playing rather than the
 whole instrument following your hand.
 
 A quick press toggles a step; a hold is a lock gesture and leaves it alone.
+
+### Stages
+
+`HOLD` and `HTYPE` are **lock-only**: their cells are struck out until a grid
+pad is down, because a `HOLD` written across a whole track would just be a
+slower track — the point is one step that stalls.
+
+`HOLD` is the Metropolis stage: the sequencer stays on that step for that many
+pulses instead of one, and `HTYPE` says what it does with them.
+
+| | |
+|---|---|
+| **HOLD** | sounds once and sits there for the rest. A TONE note sustains across the whole stage and a drum's ratchets spread over it, rather than either stopping after the first pulse |
+| **REPEAT** | sounds again on every pulse |
+| **RAMP** | the same, walking the level up a step each pulse — quiet into loud |
+| **FALL** | the same, walking it down to nothing |
+
+The rest of the page is per step by nature too. A drum step has always carried
+a note offset and until now nothing could write one; on TONE, how long a note
+lasts is about the step rather than about the pattern, and it locks the same
+way.
 
 ## The grid
 
@@ -154,8 +201,28 @@ What the 16×8 shows depends on the selected track's machine:
   degree per column, a third per row). Hold a step and play the keyboard to
   write notes onto it; play it with no step held to audition.
 
-Playhead is full brightness, written steps scale with velocity, and every
-fourth step stays faintly lit so the bars are readable.
+The lighting is a ladder, so a pattern reads without counting pads:
+
+| | |
+|---|---|
+| dark | past the end of the sequence — **the length is visible on the pads** |
+| faint | inside the sequence and empty: the floor the pattern sits on |
+| a little brighter | the first step of a bar, from the track's own time signature |
+| brighter | the playhead |
+| brightest | a written step, scaled by its velocity, and brightest of all with the playhead on it |
+
+### Time signatures and polyrhythm
+
+Every sequencer carries its own **TSIG**, from `2/4` through `7/8` to `5/16`.
+The denominator is the beat unit and it scales the step — `SPEED` counts steps
+per beat unit either way, so a `/8` track runs at half the step length of a
+`/4` one and the two pull against each other. The numerator groups those steps
+into bars, which is where the grid's bar lights come from.
+
+A track left in `4/4` runs exactly as it always did, so nothing that never
+touches this moves. Eight tracks each in their own metre is the point: a
+7-step `7/8` track against a 16-step `4/4` one is a real polyrhythm rather
+than two patterns of different lengths.
 
 **ROTATE** is a read-time offset, never a rewrite, so turning it back puts
 everything where it was. The grid and the screen look through the same
@@ -207,7 +274,7 @@ One SuperCollider engine drives all eight tracks. Each track owns a
 lock is just `(channel, value)` and nothing needs a special path:
 
 ```
-ch  0..7   mix      level pan drive sendCho sendDly sendRev width
+ch  0..7   mix      level pan drive sendCho sendDly sendRev -
 ch  8..39  syn      machine specific -- each synthdef carries its own map
                     the drums use 8..15, TONE 8..38
 ch 40..47  filter
@@ -238,6 +305,16 @@ Each track has a second, parallel *mod* bus holding LFO offsets only. The LFO
 synth scatters into it using a dynamic-index `Out.kr`, so **any** channel above
 can be a modulation destination without a routing matrix and without a cost per
 destination. Voices read the sum of the two buses.
+
+**BPM** is the one destination that is not a channel. The norns clock is not
+on the control bus and the engine has no say over it, so an LFO pointed at BPM
+is run in lua instead — `lib/core/lfo.lua`, which holds the wave shapes and
+the rate formula the engine uses, so the two agree. It only takes the tempo
+while the clock source is *internal*: with MIDI, Link or crow driving it the
+tempo is not ours to move, and the destination quietly does nothing. The
+tempo it found is handed back when the routing goes away. The first LFO with a
+BPM destination and a depth wins; two of them fighting over one clock is not a
+thing worth arranging.
 
 ## Development
 

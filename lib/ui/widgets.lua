@@ -7,6 +7,7 @@
 
 local S = include("tahned/lib/core/spec")
 local C = include("tahned/lib/instruments/common")
+local L = include("tahned/lib/core/lfo")
 
 local W = {}
 
@@ -162,14 +163,27 @@ function W.wave(x, y, w, h, sp, v, lv)
 end
 
 function W.lfowave(x, y, w, h, sp, v, lv)
-  plot(x, y, w, h, lv, 2, function(t)
-    if v == 0 then return 1 - (4 * math.abs(t - 0.5))
-    elseif v == 1 then return math.sin(t * 2 * math.pi)
-    elseif v == 2 then return (t < 0.5) and 1 or -1
-    elseif v == 3 then return 1 - (t * 2)
-    elseif v == 4 then return (t * 2) - 1
-    elseif v == 5 then return (((1 - t) ^ 3) * 2) - 1
-    else return math.sin(t * 17.3) * math.cos(t * 7.1) end
+  plot(x, y, w, h, lv, 2, function(t) return L.sample(v, t) end)
+end
+
+-- The SPD cell as a scope. It draws the wave that is actually selected, at
+-- the rate SPD and MULT actually give it, scrolling in real time -- so the
+-- cell answers "how fast, and moving how" rather than showing a number and a
+-- generic sine. The window is a fixed two seconds, so a faster LFO fits more
+-- cycles into the same box, which is what speed looks like.
+local SCOPE_WINDOW = 2.0
+
+function W.lfoscope(x, y, w, h, sp, v, lv, extra)
+  extra = extra or {}
+  local hz = L.hz(v, extra.mult, extra.bpm or 120)
+  local cycles = util.clamp(hz * SCOPE_WINDOW, 0.08, 9)
+  local phase = ((extra.now or 0) * hz) % 1
+  local wave = extra.wave or 0
+
+  -- a still centre line, so a very slow LFO still reads as a line that moves
+  frame_line(x, y + (h / 2), w, 1)
+  plot(x, y, w, h, lv, 3, function(t)
+    return L.sample(wave, (t * cycles) - phase)
   end)
 end
 
@@ -505,6 +519,149 @@ function W.glitch(x, y, w, h, sp, v, lv)
       screen.line(x + i, y + h - hy)
     end
   end
+  screen.stroke()
+end
+
+-- ------------------------------------------------------- joined envelope
+--
+-- An envelope generator is one shape, not four unrelated pictures, so the
+-- ADSR is drawn once across the whole run of cells it is spread over and
+-- each cell simply has part of it passing through. A long attack really does
+-- push the decay into the next box, which is the thing worth seeing.
+--
+-- `segs` is the run in order, each { kind, p } with p the 0..1 position of
+-- that cell's value. A "sus" is a level rather than a time, so it takes a
+-- fixed slice of the width and sets the height everything after it lands on.
+
+local ENV_MINW = 0.14   -- a segment at zero is still a visible corner
+
+local function env_layout(segs, w)
+  local wt, total = {}, 0
+  for i, sg in ipairs(segs) do
+    wt[i] = (sg.kind == "sus") and 0.85 or (ENV_MINW + sg.p)
+    total = total + wt[i]
+  end
+  for i = 1, #segs do wt[i] = (wt[i] / total) * w end
+  return wt
+end
+
+-- the points of one segment, given where it starts and at what level
+local function env_seg(sg, x0, wseg, sus, lvl, y, h)
+  local pts, n = {}, 9
+  local function at(t, v) pts[#pts + 1] = { x0 + (t * wseg), y + h - (v * h) } end
+  at(0, lvl)
+  if sg.kind == "atk" then
+    for i = 1, n do local t = i / n; at(t, lvl + ((1 - lvl) * (t ^ 0.55))) end
+    return pts, 1
+  elseif sg.kind == "dec" then
+    for i = 1, n do local t = i / n; at(t, sus + ((lvl - sus) * ((1 - t) ^ 2))) end
+    return pts, sus
+  elseif sg.kind == "rel" then
+    for i = 1, n do local t = i / n; at(t, lvl * ((1 - t) ^ 2)) end
+    return pts, 0
+  end
+  at(1, lvl)                      -- sus / hold: a plateau
+  return pts, lvl
+end
+
+-- `sel` is the index of the segment the cursor is on, drawn bright over the
+-- dim whole. Returns nothing; the caller has already placed the labels.
+function W.envelope(x, y, w, h, segs, sel)
+  local sus = 0
+  for _, sg in ipairs(segs) do if sg.kind == "sus" then sus = sg.p end end
+
+  local wt = env_layout(segs, w)
+  local runs, cut = {}, {}
+  local cx, lvl = x, 0
+  for i, sg in ipairs(segs) do
+    local pts
+    pts, lvl = env_seg(sg, cx, wt[i], sus, lvl, y, h)
+    runs[i] = pts
+    cx = cx + wt[i]
+    cut[i] = cx
+  end
+
+  -- baseline, then the boundary between one segment and the next, so the
+  -- cells still read as cells even though the shape crosses them
+  frame_line(x, y + h, w, 1)
+  screen.level(2)
+  for i = 1, #segs - 1 do screen.rect(cut[i], y + h - 2, 1, 2) end
+  screen.fill()
+
+  local function stroke(i, lv)
+    local pts = runs[i]
+    screen.level(lv)
+    screen.move(pts[1][1], pts[1][2])
+    for k = 2, #pts do screen.line(pts[k][1], pts[k][2]) end
+    screen.stroke()
+  end
+  for i = 1, #segs do stroke(i, 6) end
+  if sel and runs[sel] then stroke(sel, 15) end
+end
+
+-- ------------------------------------------------------------------ step
+
+-- how many pulses a held step lasts: the cell divided into that many blocks,
+-- so it reads as a subdivision rather than as a number
+function W.hold_n(x, y, w, h, sp, v, lv)
+  local n = util.clamp(util.round(v), 1, 16)
+  local bw = w / n
+  screen.level(2)
+  screen.rect(x, y + h - 1, w, 1)
+  screen.fill()
+  screen.level(lv)
+  for i = 1, n do
+    screen.rect(x + ((i - 1) * bw), y + h - 6, math.max(1, bw - 1), 6)
+  end
+  screen.fill()
+end
+
+-- what the pulses of a held step do: one plateau, four even hits, four
+-- climbing, four falling away
+function W.htype(x, y, w, h, sp, v, lv)
+  screen.level(lv)
+  if v == 0 then
+    screen.move(x, y + h)
+    screen.line(x, y + 1)
+    screen.line(x + w - 1, y + 1)
+    screen.line(x + w - 1, y + h)
+    screen.stroke()
+    return
+  end
+  local n, bw = 4, w / 4
+  for i = 1, n do
+    local a = 1
+    if v == 2 then a = i / n elseif v == 3 then a = 1 - ((i - 1) / n) end
+    screen.rect(x + ((i - 1) * bw), y + h - (h * a), math.max(1, bw - 2), h * a)
+  end
+  screen.fill()
+end
+
+-- the metre: one tick a beat, the downbeat taller, the ticks closer together
+-- as the beat unit gets shorter -- so 7/8 looks tighter and busier than 3/4
+function W.tsig(x, y, w, h, sp, v, lv)
+  local ts = C.TSIG[util.round(v) + 1] or C.TSIG[1]
+  local gap = util.clamp((w / ts.num) * math.min(1, 4 / ts.den) * 1.6, 1.5, w / ts.num)
+  frame_line(x, y + h - 1, w, 2)
+  screen.level(lv)
+  for i = 1, ts.num do
+    local px = x + ((i - 1) * gap)
+    if px < x + w then
+      screen.rect(px, y + h - ((i == 1) and h or (h * 0.55)), 1,
+        (i == 1) and h or (h * 0.55))
+    end
+  end
+  screen.fill()
+end
+
+-- A lock-only cell, with nothing held: the control is there but there is
+-- nothing for it to be turned on, so it is struck out rather than absent.
+function W.strike(x, y, w, h)
+  screen.level(3)
+  screen.move(x + 2, y + 1)
+  screen.line(x + w - 2, y + h - 1)
+  screen.move(x + w - 2, y + 1)
+  screen.line(x + 2, y + h - 1)
   screen.stroke()
 end
 

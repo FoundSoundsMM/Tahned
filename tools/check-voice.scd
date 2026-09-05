@@ -53,7 +53,8 @@ toneScore = { |name, change|
 	("wrote tone " ++ name).postln;
 };
 
-[["kick-default", "kick"], ["kick-flat", "kick"], ["snare", "snare"],
+[["kick-default", "kick"], ["kick-flat", "kick"],
+	["kick-body", "kick"], ["kick-bodyflat", "kick"], ["snare", "snare"],
 	["hat", "hat"], ["tom", "tom"], ["cymb", "cymb"]].do { |c|
 	drumScore.value(c[0], c[1]);
 };

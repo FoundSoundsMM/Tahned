@@ -2,6 +2,7 @@
 local drums = include("tahned/lib/instruments/drums")
 local tone  = include("tahned/lib/instruments/tone")
 local C     = include("tahned/lib/instruments/common")
+local S     = include("tahned/lib/core/spec")
 
 local I = {}
 for _, d in ipairs(drums) do table.insert(I, d) end
@@ -26,7 +27,7 @@ end
 
 -- every channel-backed parameter a machine has, for LFO destination lists
 function I.destinations_for(m)
-  local d = { { ch = 88, name = "OFF" } }
+  local d = { { ch = S.NULL_DEST, name = "OFF" } }
   for _, page in ipairs(I.pages_for(m)) do
     for _, sp in ipairs(page.params) do
       if sp.ch and (sp.k == "cont" or sp.k == "enum" or sp.k == "int") and sp.ch < 56 then
@@ -34,6 +35,11 @@ function I.destinations_for(m)
       end
     end
   end
+  -- The clock is not on the control bus and the engine has no say over it, so
+  -- BPM is served by lib/core/lfo.lua running that one LFO in lua. It sits in
+  -- the list like any other destination; it is only ignored while an external
+  -- clock is driving the tempo.
+  table.insert(d, { ch = S.BPM_DEST, name = "BPM" })
   return d
 end
 

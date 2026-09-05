@@ -146,43 +146,47 @@ end
 
 print("rendering " .. OUT)
 
--- Drums  1 MIX  2 SEQ  3 SYNTH  4 FILTER  5..8 LFO
-shot("01-kick",       "KICK / SYNTH",   1, 3, 2)
-shot("02-snare",      "SNARE / SYNTH",  2, 3, 2, function(t)
-  dial(t, 3, 3, 70); dial(t, 3, 7, 40)
+-- Drums  1 MIX  2 SEQ  3 STEP  4 SYNTH  5 FILTER  6..9 LFO
+shot("00-mix",        "KICK / MIX",     1, 1, 3)
+shot("01-kick",       "KICK / SYNTH",   1, 4, 2)
+shot("02-snare",      "SNARE / SYNTH",  2, 4, 2, function(t)
+  dial(t, 4, 3, 70); dial(t, 4, 7, 40)
 end)
-shot("03-hat",        "HAT / SYNTH",    3, 3, 5)
-shot("04-tom",        "TOM / SYNTH",    4, 3, 2)
-shot("05-cymb",       "CYMB / SYNTH",   5, 3, 4)
-shot("06-drum-seq",   "KICK / SEQ",     1, 2, 2)
-shot("07-filter",     "FILTER",         1, 4, 2, function(t)
-  dial(t, 4, 2, 70); dial(t, 4, 3, 60); dial(t, 4, 5, 30)
+shot("03-hat",        "HAT / SYNTH",    3, 4, 5)
+shot("04-tom",        "TOM / SYNTH",    4, 4, 2)
+shot("05-cymb",       "CYMB / SYNTH",   5, 4, 4)
+shot("06-drum-seq",   "KICK / SEQ",     1, 2, 3, function(t)
+  t:seq().s.tsig = 9                    -- 7/8, so the metre cell has a job
 end)
-shot("08-lfo",        "LFO 1",          1, 5, 5)
+shot("06b-drum-step", "KICK / STEP",    1, 3, 1)
+shot("07-filter",     "FILTER",         1, 5, 5, function(t)
+  dial(t, 5, 2, 70); dial(t, 5, 3, 60); dial(t, 5, 5, 30)
+end)
+shot("08-lfo",        "LFO 1",          1, 6, 1)
 
--- TONE  1 MIX 2 SEQ 3 HARMONY 4 ALGO 5 OPS 6 AMP EG 7 MOD EG 8 FILTER ...
-shot("09-tone-algo",  "TONE / ALGO",    6, 4, 1)
-shot("09b-tone-ops",  "TONE / OPS",     6, 5, 2)
-shot("10-tone-ampeg", "TONE / AMP EG",  6, 6, 2)
-shot("10b-tone-modeg","TONE / MOD EG",  6, 7, 5, function(t)
-  dial(t, 7, 6, 40); dial(t, 7, 7, 4); dial(t, 7, 8, -30)
+-- TONE  1 MIX 2 SEQ 3 STEP 4 HARMONY 5 ALGO 6 OPS 7 AMP EG 8 MOD EG 9 FILTER
+shot("09-tone-algo",  "TONE / ALGO",    6, 5, 1)
+shot("09b-tone-ops",  "TONE / OPS",     6, 6, 2)
+shot("10-tone-ampeg", "TONE / AMP EG",  6, 7, 2)
+shot("10b-tone-modeg","TONE / MOD EG",  6, 8, 1, function(t)
+  dial(t, 8, 6, 40); dial(t, 8, 7, 4); dial(t, 8, 8, -30)
 end)
-shot("11-tone-harm",  "TONE / HARMONY", 6, 3, 4, function(t)
+shot("11-tone-harm",  "TONE / HARMONY", 6, 4, 4, function(t)
   local sq = t:seq()
   sq.s.chord = 11; sq.s.scale = 3; sq.s.invert = 1
 end)
 
 -- every algorithm, to check the routing glyph against the engine's tables
 for a = 0, 7 do
-  shot(string.format("20-algo4-%d", a + 1), "TONE / ALGO " .. (a + 1), 6, 4, 1,
-    function(t) state.set_page(4); t:set(state.track().pages[4].params[1], a) end)
+  shot(string.format("20-algo4-%d", a + 1), "TONE / ALGO " .. (a + 1), 6, 5, 1,
+    function(t) state.set_page(5); t:set(state.track().pages[5].params[1], a) end)
 end
 
 -- a parameter lock in progress, over two held steps at once
 do
   state.select_track(1)
   state.tracks[1]:set_machine(1)
-  state.set_page(3)
+  state.set_page(4)
   state.cursor = 1
   tahned.grid.g.key(5, 1, 1)
   tahned.grid.g.key(7, 1, 1)
@@ -193,6 +197,25 @@ do
     title = "KICK / SYNTH  steps 5 and 7 held, TUNE locked on both" }
   tahned.grid.g.key(7, 1, 0)
   tahned.grid.g.key(5, 1, 0)
+end
+
+-- the STEP page is struck out until a pad is held; this is it live, with a
+-- four pulse RAMP written onto one step
+do
+  state.select_track(1)
+  state.tracks[1]:set_machine(1)
+  state.set_page(3)
+  state.cursor = 1
+  tahned.grid.g.key(3, 1, 1)
+  enc(3, 3)                            -- HOLD 4
+  state.cursor = 2
+  enc(3, 2)                            -- HTYPE RAMP
+  S.clear(); redraw()
+  save("14b-hold", "KICK / STEP  step 3 held, four pulses, RAMP")
+  shots[#shots + 1] = { name = "14b-hold",
+    title = "KICK / STEP  step 3 held, four pulses, RAMP" }
+  tahned.grid.g.key(3, 1, 0)
+  state.cursor = 1
 end
 
 -- the master: its own page set, K2+K3 to reach it

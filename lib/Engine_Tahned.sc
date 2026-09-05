@@ -5,7 +5,7 @@
 // values into it; the synthdefs do all range mapping. That keeps parameter
 // locks uniform: a lock is just (channel, value).
 //
-//   ch  0..7   mix      level pan drive sendCho sendDly sendRev width -
+//   ch  0..7   mix      level pan drive sendCho sendDly sendRev - -
 //   ch  8..39  syn      instrument specific; see each synthdef for its map
 //   ch 40..47  filter   type cutoff res envAmt envAtk envDec keytrk drive
 //   ch 48..55  spare    COLOUR used to live here; it is on the master now
@@ -255,9 +255,12 @@ Engine_Tahned : CroneEngine {
 				var pun  = p[15];
 				var atk  = 0.0008 * (2 ** (g[1] * 4));
 				var base = (note + tune).midicps;
-				// the drop, and it is the whole of what makes a kick a kick, so
-				// it is not zero by default
-				var swp  = EnvGen.ar(Env([1, 0], [stim], [-4]));
+				// The drop, and it is the whole of what makes a kick a kick, so
+				// it is not zero by default. The curve is what makes S.TIME
+				// mean anything: at -4 the fall was over in the first fifth of
+				// the time set, so a 40ms sweep was heard as a 8ms tick and
+				// both controls looked inert. -2.5 spends the whole of it.
+				var swp  = EnvGen.ar(Env([1, 0], [stim], [-2.5]));
 				var f    = base * (2 ** (swp * sdep * 4));
 				var mod, body, amp, click, sig;
 
@@ -381,8 +384,10 @@ Engine_Tahned : CroneEngine {
 				var atk  = 0.0008 * (2 ** (g[1] * 4));
 				var f0   = (note + tune + 7).midicps;
 				// a tom bends about a fifth, not two octaves; the shallower
-				// range is what keeps it a tom as the control is opened up
-				var swp  = EnvGen.ar(Env([1, 0], [btim], [-4]));
+				// range is what keeps it a tom as the control is opened up.
+				// Same curve as the kick, and for the same reason: at -4 the
+				// bend was over long before B.TIME said it was.
+				var swp  = EnvGen.ar(Env([1, 0], [btim], [-2.5]));
 				var f    = f0 * (2 ** (swp * bend * 1.2));
 				var mod, body, amp, hit, shell, sig;
 
@@ -616,24 +621,23 @@ Engine_Tahned : CroneEngine {
 		}).add;
 
 		// =========================================================== STRIP
-		// per track: drive -> width/pan/level -> the mix bus + three sends.
+		// per track: drive -> pan/level -> the mix bus + three sends.
 		// The colour chain used to be here, eight deep; it is one chain on the
 		// master now, so a track's strip is only what makes it a track.
+		//
+		// There is no width stage any more. A mid/side trim over a track that
+		// is mostly one voice measured something rather than moved it, and it
+		// sat where the control everybody actually reaches for should be. PAN
+		// places the track; the image it arrives with is left alone.
 		SynthDef(\tahned_strip, { |bus = 0, mbus = 0, gbus = 0, in = 0, out = 0,
 			cho = 0, dly = 0, rev = 0|
 			var p = (In.kr(bus, nCh) + In.kr(mbus, nCh)).lag(0.02);
 			var g = In.kr(gbus, 8).lag(0.05);
 			var lvl  = p[0], pan = (p[1] * 2) - 1, drv = (p[2] + g[7]).clip(0, 1);
-			var sCho = p[3], sDly = p[4], sRev = p[5], width = p[6];
+			var sCho = p[3], sDly = p[4], sRev = p[5];
 			var sig = In.ar(in, 2);
-			var m, sd;
 
 			sig = ((sig * (1 + (drv * 12))).tanh) / (1 + (drv * 2.2));
-
-			// mid/side width
-			m = (sig[0] + sig[1]) * 0.5;
-			sd = (sig[0] - sig[1]) * 0.5 * (width * 2);
-			sig = [m + sd, m - sd];
 
 			sig = Balance2.ar(sig[0], sig[1], pan, lvl.squared * 1.4);
 			sig = Limiter.ar(sig, 0.95, 0.005);

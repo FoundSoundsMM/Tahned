@@ -44,7 +44,8 @@ return {
     -- CYCLE is one control over both envelopes rather than a LOOP switch on
     -- each: the pair was never usefully split, and folding them frees the
     -- cell the mod EG's second destination needs.
-    { name = "AMP EG", params = {
+    { name = "AMP EG", env = { at = 1, segs = { "atk", "dec", "sus", "rel" } },
+      params = {
       S.c(24, "ATK",    { def = 8,  g = "atk" }),
       S.c(25, "DEC",    { def = 40, g = "rel" }),
       S.c(26, "SUS",    { def = 90, g = "bar" }),
@@ -54,7 +55,8 @@ return {
       -- pans a chord across the field by pitch, low to high; not a pan offset
       S.b(30, "SPREAD", { def = 0, g = "pan" }),
     }},
-    { name = "MOD EG", params = {
+    { name = "MOD EG", env = { at = 1, segs = { "atk", "dec", "sus", "rel" } },
+      params = {
       S.c(31, "ATK",   { def = 4,  g = "atk" }),
       S.c(32, "DEC",   { def = 50, g = "rel" }),
       S.c(33, "SUS",   { def = 0,  g = "bar" }),

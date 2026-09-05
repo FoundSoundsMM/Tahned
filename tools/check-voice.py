@@ -178,17 +178,24 @@ for tag, (clo, chi), (tlo, thi) in DRUMS:
 # window has to sit inside the body -- past a couple of hundred milliseconds
 # the kick is already gone, and crossings of what is left mean nothing.
 print()
-d, f = load("kick-default"), load("kick-flat")
+d, f = load("kick-body"), load("kick-bodyflat")
 if d and f:
     dsr, ds = d
     fsr, fs = f
     dlate, flate = f0(ds, dsr, 0.05, 0.25), f0(fs, fsr, 0.05, 0.25)
-    dcyc, fcyc = cycles(ds, dsr, 0.001, 0.061), cycles(fs, fsr, 0.001, 0.061)
+    # A cycle count over 60ms is too blunt to tell a real sweep from a tick:
+    # it read 3 against 2 while the drop was over in three milliseconds and
+    # nobody could hear it. Compare the pitch of the front of the hit against
+    # the pitch it settles on instead, which is the thing being claimed.
+    dearly, fearly = f0(ds, dsr, 0.0, 0.035), f0(fs, fsr, 0.0, 0.035)
     want(40 < dlate < 58,
          f"the kick settles on an 808 fundamental ({dlate:.1f} Hz, want ~49)")
-    want(dcyc >= fcyc + 1,
-         f"SWEEP bends the pitch: {dcyc} cycles in the first 60ms against "
-         f"{fcyc} with it centred")
+    want(dearly > dlate * 1.3,
+         f"SWEEP bends the pitch audibly: the first 35ms average "
+         f"{dearly:.0f} Hz against {dlate:.0f} Hz settled (want > 1.3x)")
+    want(fearly < flate * 1.15,
+         f"and with SWEEP centred the pitch does not move "
+         f"({fearly:.0f} -> {flate:.0f} Hz)")
     want(abs(dlate - flate) < 3,
          f"and both land on the same pitch once it has settled "
          f"({dlate:.1f} / {flate:.1f} Hz)")

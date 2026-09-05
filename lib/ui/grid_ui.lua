@@ -94,14 +94,26 @@ end
 
 -- ------------------------------------------------------------------ leds
 
-local function step_level(sq, st, idx, head, len, held)
+-- A ladder of levels, so the pattern reads at a glance without counting pads:
+--
+--   0   past the end of the sequence -- dark, so the length is visible
+--   2   inside the sequence, empty -- the faint floor the pattern sits on
+--   4   the first step of a bar, from the track's own time signature
+--   7   the playhead
+--   9-14 an active step, by its velocity; 15 with the playhead on it
+--
+-- The floor is the point: a 12 step sequence is now twelve lit pads and four
+-- dark ones rather than a guess.
+local function step_level(sq, st, idx, head, len, held, bar)
   if idx > len then return 0 end
   if held then return 15 end
-  if idx == head then return 15 end
   if st and st.on then
-    return util.round(util.linlin(0, 127, 5, 12, st.vel or 100))
+    if idx == head then return 15 end
+    return util.round(util.linlin(0, 127, 9, 14, st.vel or 100))
   end
-  return ((idx - 1) % 4 == 0) and 3 or 1
+  if idx == head then return 7 end
+  if bar and ((idx - 1) % bar) == 0 then return 4 end
+  return 2
 end
 
 function G.redraw()
@@ -129,11 +141,12 @@ function G.redraw()
   local sq = t:seq()
 
   if sq.kind == "tone" then
-    local len = sq:length()
+    local len, bar = sq:length(), sq:bar_steps()
     for y = 1, 4 do
       for x = 1, 16 do
         local i = grid_step(x, y)
-        G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len, st8.held[i]))
+        G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len,
+          st8.held[i], bar))
       end
     end
     -- keyboard: scale roots brighter, notes on the held step brighter still
@@ -152,11 +165,12 @@ function G.redraw()
     end
 
   else
-    local len = sq:length()
+    local len, bar = sq:length(), sq:bar_steps()
     for y = 1, 8 do
       for x = 1, 16 do
         local i = grid_step(x, y)
-        G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len, st8.held[i]))
+        G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len,
+          st8.held[i], bar))
       end
     end
   end
@@ -273,9 +287,11 @@ end
 
 -- ------------------------------------------------- encoder while holding
 
--- Sequencer settings that mean something on a single step. Length, speed and
--- direction describe the whole pattern, so they are not among them.
-local STEP_SEQ = { prob = true, ratchet = true, gate = true }
+-- Sequencer settings that mean something on a single step. Length, speed,
+-- metre and direction describe the whole pattern, so they are not among them.
+-- HOLD, HTYPE and NOTE are lock-only and live nowhere else at all.
+local STEP_SEQ = { prob = true, ratchet = true, gate = true,
+                   hold = true, htype = true, note = true }
 
 -- Every step currently held takes the edit, so a handful of pads can be
 -- locked together in one gesture.

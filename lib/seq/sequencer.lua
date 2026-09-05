@@ -29,6 +29,7 @@ function Seq.new(track, kind, m)
   o.steps = {}
   o.pos = 0
   o.last = 0
+  o.hold_n, o.hold_k = 1, 1
   o.fwd = true
   o.active_locks = {}
   o.vid = 0
@@ -45,8 +46,28 @@ function Seq:set(sp, v)
 end
 
 function Seq:length() return util.clamp(self.s.length or 16, 1, self.maxlen) end
+
+-- ------------------------------------------------------------------- metre
+--
+-- The time signature is per sequencer, which is what makes polyrhythm cheap:
+-- the denominator is the beat unit and scales the step, the numerator groups
+-- steps into bars. SPEED counts steps per beat unit either way, so a track
+-- left in 4/4 runs exactly as it always did.
+
+function Seq:tsig()
+  return C.TSIG[(self.s.tsig or 0) + 1] or C.TSIG[1]
+end
+
 function Seq:step_beats(speed)
-  return 0.25 / C.SPEEDS[(speed or self.s.speed) + 1]
+  local sp = C.SPEEDS[(speed or self.s.speed) + 1] or 1
+  return (4 / self:tsig().den) * 0.25 / sp
+end
+
+-- how many steps fill one bar of this track's signature; the grid lights the
+-- first of every one of them so the bar lines are visible on the pads
+function Seq:bar_steps()
+  local sp = C.SPEEDS[(self.s.speed or 5) + 1] or 1
+  return math.max(1, util.round(self:tsig().num * sp * 4))
 end
 
 -- ------------------------------------------------------------------- steps
@@ -143,6 +164,32 @@ function Seq:disp_step(i)
   return self.steps[self:disp(i)]
 end
 
+-- ------------------------------------------------------------------- hold
+--
+-- A step with HOLD locked onto it is a Metropolis stage: the sequencer stays
+-- put for that many pulses instead of one. HTYPE says what happens to them.
+--
+--   HOLD    sounds once and sits there for the rest
+--   REPEAT  sounds again on every pulse
+--   RAMP    the same, walking the level up a step each pulse
+--   FALL    the same, walking it down to nothing
+--
+-- It only ever comes off a step. There is no track-wide hold, because a hold
+-- on every step is just a slower track and SPEED already does that.
+
+function Seq:hold_count(st)
+  return util.clamp(util.round((st and st.hold) or 1), 1, 16)
+end
+
+function Seq:hold_type(st) return (st and st.htype) or 0 end
+
+function Seq:hold_amp(ht, k, n)
+  if n <= 1 then return 1 end
+  if ht == 2 then return k / n end            -- RAMP: quiet to loud
+  if ht == 3 then return 1 - ((k - 1) / n) end -- FALL: full, then away
+  return 1
+end
+
 function Seq:chance(st)
   local p = (st and st.prob) or self.s.prob or 100
   return math.random(100) <= p
@@ -163,6 +210,7 @@ function Seq:stop()
   self:all_off()
   self:release_locks()
   self.pos, self.last = 0, 0
+  self.hold_n, self.hold_k = 1, 1
 end
 
 function Seq:swing_delay(pos, beats)
@@ -171,16 +219,43 @@ function Seq:swing_delay(pos, beats)
   return beats * (sw / 100)
 end
 
+function Seq:swing(pos, beats)
+  local d = self:swing_delay(pos, beats)
+  if d > 0 then clock.sleep(clock.get_beat_sec() * d) end
+end
+
 function Seq:loop()
   while true do
     local beats = self:step_beats()
     clock.sync(beats)
     local len = self:length()
     local pos = self:advance(self, len)
-    local d = self:swing_delay(pos, beats)
-    if d > 0 then clock.sleep(clock.get_beat_sec() * d) end
+    self:swing(pos, beats)
     self.last = self:read_index(pos, len)
-    self:fire(self.last, beats)
+
+    local st = self.steps[self.last]
+    local n  = self:hold_count(st)
+    local ht = self:hold_type(st)
+    self.hold_n, self.hold_k = n, 1
+
+    -- HOLD sustains rather than retriggers, so the first hit is told about
+    -- the whole stage: a tone holds its note across it and a ratchet spreads
+    -- over it, instead of both ending after one pulse of silence.
+    self:fire(self.last, (ht == 0) and (beats * n) or beats,
+      self:hold_amp(ht, 1, n))
+
+    for k = 2, n do
+      clock.sync(beats)
+      self:swing(pos + k - 1, beats)
+      self.hold_k = k
+      if ht == 0 then
+        -- still this step: its locks stay applied, nothing sounds again
+        self:apply_locks(st)
+      else
+        self:fire(self.last, beats, self:hold_amp(ht, k, n))
+      end
+    end
+    self.hold_n, self.hold_k = 1, 1
   end
 end
 
@@ -297,14 +372,15 @@ function Seq:vid_next()
   return self.vid
 end
 
-function Seq:fire(i, beats)
+function Seq:fire(i, beats, amp)
   local st = self.steps[i]
+  amp = amp or 1
   self:apply_locks(st)
   if not (st and st.on) then return end
   if not self:chance(st) then return end
 
   if self.kind == "drum" then
-    local vel = (st.vel or 100) / 127
+    local vel = ((st.vel or 100) / 127) * amp
     local note = 36 + (st.note or 0)
     local r = st.ratchet or self.s.ratchet or 1
     if r <= 1 then
@@ -325,7 +401,7 @@ function Seq:fire(i, beats)
     local gate = (st.gate or self.s.gate or 50) / 100
     local dur = clock.get_beat_sec() * beats * gate
     local strum = ((self.s.strum or 0) / 100) * clock.get_beat_sec() * beats * 0.5
-    local vel = (st.vel or 100) / 127
+    local vel = ((st.vel or 100) / 127) * amp
     for k, n in ipairs(notes) do
       clock.run(function()
         if strum > 0 and k > 1 then clock.sleep(strum * (k - 1) / #notes) end

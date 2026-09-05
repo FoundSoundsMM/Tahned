@@ -18,10 +18,13 @@ local state = include("tahned/lib/core/state")
 local P     = include("tahned/lib/ui/pages")
 local G     = include("tahned/lib/ui/grid_ui")
 local Track = include("tahned/lib/core/track")
+local LFO   = include("tahned/lib/core/lfo")
 
 local combo = false
 local shifted = {}
-local screen_metro, grid_metro
+local screen_metro, grid_metro, lfo_metro
+
+local LFO_RATE = 1 / 30
 
 -- ------------------------------------------------------------------- params
 
@@ -68,7 +71,7 @@ end
 -- Bumped when the channel map moves under a machine, since a slot's values
 -- and a step's locks are both keyed by channel and would land on the wrong
 -- parameter otherwise.
-local DATA_VERSION = 3
+local DATA_VERSION = 4
 
 function state.serialize()
   local out = { v = DATA_VERSION, sel = state.sel, tracks = {} }
@@ -120,7 +123,8 @@ end
 -- Exposed on purpose: include() hands every caller its own copy of a module,
 -- so this is the only handle on the live ones -- for the maiden repl and for
 -- tools/check-lua.lua.
-tahned = { state = state, grid = G, pages = P, instruments = I, master = M }
+tahned = { state = state, grid = G, pages = P, instruments = I, master = M,
+           lfo = LFO }
 
 function init()
   state.init()
@@ -137,8 +141,11 @@ function init()
     params:bang()
   end)
 
+  -- P.anim is set by a page that has a cell moving under its own steam --
+  -- the LFO scope. Drawing it sets the flag again, so the page keeps itself
+  -- alive and any other page falls straight back to redrawing on demand.
   screen_metro = metro.init(function()
-    if state.dirty or state.playing then
+    if state.dirty or state.playing or P.anim then
       redraw()
       state.dirty = false
     end
@@ -147,12 +154,22 @@ function init()
 
   grid_metro = metro.init(function() G.redraw() end, 1 / 30)
   grid_metro:start()
+
+  -- The one LFO destination the engine cannot serve. BPM is the norns clock,
+  -- not a control channel, so a track pointed at it is run from here instead
+  -- -- and only while the clock is ours to move.
+  lfo_metro = metro.init(function()
+    if LFO.step(state.tracks, LFO_RATE) then state.dirty = true end
+  end, LFO_RATE)
+  lfo_metro:start()
 end
 
 function cleanup()
   state.stop()
   if screen_metro then screen_metro:stop() end
   if grid_metro then grid_metro:stop() end
+  if lfo_metro then lfo_metro:stop() end
+  LFO.release()
 end
 
 -- ---------------------------------------------------------------------- keys
@@ -249,7 +266,9 @@ function enc(n, d)
     mult = (sp.k == "cont" or sp.k == "int") and 10 or 1
   end
 
-  if not G.try_lock(sp, d * mult) then
+  -- a lock-only control has nothing to turn unless a step is held: the edit
+  -- either lands on that step or it does not happen
+  if not G.try_lock(sp, d * mult) and not sp.lockonly then
     t:delta(sp, d * mult)
   end
   state.dirty = true

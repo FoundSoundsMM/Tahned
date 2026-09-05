@@ -12,6 +12,11 @@ local musicutil = require "musicutil"
 
 local P = {}
 
+-- Set while a page has a cell that moves on its own -- the LFO scope. The
+-- screen metro reads it, so an animated page keeps redrawing and a still one
+-- costs nothing.
+P.anim = false
+
 local CW, CH = 32, 26
 local TOP = 8
 
@@ -27,7 +32,10 @@ local function value_text(track, sp, v)
   if sp.k == "mach" then return S.MACHINE[v + 1] end
   if sp.k == "dest" then
     if v == S.NULL_DEST then return "OFF" end
-    local d = track.chspec[v]
+    -- read the machine's own destination list: BPM is in it and is not a
+    -- channel any page holds, so chspec would not find it
+    local i = track.dest_by_ch[v]
+    local d = i and track.dests[i]
     return d and d.name or "-"
   end
   if sp.id == "scale" then
@@ -40,10 +48,26 @@ end
 
 -- ---------------------------------------------------------------- cells
 
-local function draw_cell(track, sp, i, selected, lockv)
+local function glyph_extra(track, sp)
+  if sp.g == "filt" then return track:raw(40) end
+  if sp.g == "lfoscope" then
+    -- the scope needs the rest of its own LFO: the wave to draw and the
+    -- multiplier that, with SPD and the tempo, sets how fast it runs
+    P.anim = true
+    return { wave = track:raw(sp.ch + 2), mult = track:raw(sp.ch + 1),
+             bpm = clock.get_tempo(), now = util.time() }
+  end
+  return nil
+end
+
+local function draw_cell(track, sp, i, selected, lockv, noglyph, holding)
   local x, y = cell_xy(i)
   local v = lockv or track:get(sp)
   if v == nil then v = sp.def or 0 end
+  -- A lock-only control is inert unless a step is being held: it is still
+  -- drawn, so the page is the same page either way, but it is plainly not
+  -- turnable. Holding a pad is what wakes it, lock written or not.
+  local inert = sp.lockonly and not holding
 
   -- label, inverted when this is the cell the encoders are on
   if selected then
@@ -52,18 +76,23 @@ local function draw_cell(track, sp, i, selected, lockv)
     screen.fill()
     screen.level(0)
   else
-    screen.level(4)
+    screen.level(inert and 3 or 4)
   end
   screen.move(x + 2, y + 6)
   screen.text(sp.name)
 
-  -- glyph
-  local extra
-  if sp.g == "filt" then extra = track:raw(40) end
-  W.draw(sp.g or "bar", x + 2, y + 9, CW - 6, 9, sp, v, selected and 15 or 9, extra)
+  -- glyph. An envelope run draws once across all of its cells instead.
+  if not noglyph then
+    if inert then
+      W.strike(x + 2, y + 9, CW - 6, 9)
+    else
+      W.draw(sp.g or "bar", x + 2, y + 9, CW - 6, 9, sp, v,
+        selected and 15 or 9, glyph_extra(track, sp))
+    end
+  end
 
   -- value; a locked value is flagged so it is never mistaken for the track's
-  screen.level(selected and 15 or 6)
+  screen.level(inert and 3 or (selected and 15 or 6))
   screen.move(x + 2, y + 24)
   screen.text(value_text(track, sp, v))
   if lockv then
@@ -71,6 +100,27 @@ local function draw_cell(track, sp, i, selected, lockv)
     screen.rect(x + CW - 6, y + 20, 3, 3)
     screen.fill()
   end
+end
+
+-- One envelope across the run of cells its segments occupy, rather than four
+-- separate pictures of four numbers. Returns the cell range it covered so the
+-- cells themselves know to leave their glyph out.
+local function draw_env(state, track, page)
+  local e = page.env
+  if not e then return 0, -1 end
+  local segs = {}
+  for k, kind in ipairs(e.segs) do
+    local sp = page.params[e.at + k - 1]
+    if not sp then return 0, -1 end
+    local v = state.lock_value(sp) or track:get(sp)
+    if v == nil then v = sp.def or 0 end
+    segs[k] = { kind = kind, p = S.unit_pos(sp, v) }
+  end
+  local x, y = cell_xy(e.at)
+  local sel = state.cursor - e.at + 1
+  if sel < 1 or sel > #segs then sel = nil end
+  W.envelope(x + 2, y + 9, (#segs * CW) - 6, 9, segs, sel)
+  return e.at, e.at + #segs - 1
 end
 
 -- ---------------------------------------------------------------- chrome
@@ -118,9 +168,15 @@ local function draw_footer(track)
   local len = sq:length()
   local w = 128 / len
   local head = sq:playhead()
+  local bar = sq:bar_steps()
   for i = 1, len do
     local st = sq:disp_step(i)
-    screen.level(i == head and 15 or ((st and st.on) and 6 or 1))
+    local on = st and st.on
+    local lv = 1
+    if ((i - 1) % bar) == 0 then lv = 3 end
+    if on then lv = 6 end
+    if i == head then lv = 15 end
+    screen.level(lv)
     screen.rect((i - 1) * w, y, math.max(1, w - (len > 32 and 0 or 1)),
       i == head and 3 or 2)
   end
@@ -141,10 +197,13 @@ function P.draw_page(state)
   end
   screen.fill()
 
+  local e0, e1 = draw_env(state, track, page)
+  local holding = state.lock_step ~= nil
   for i = 1, 8 do
     local sp = page.params[i]
     if sp then
-      draw_cell(track, sp, i, i == state.cursor, state.lock_value(sp))
+      draw_cell(track, sp, i, i == state.cursor, state.lock_value(sp),
+        i >= e0 and i <= e1, holding)
     end
   end
 
@@ -287,6 +346,7 @@ function P.draw_master(state)
 end
 
 function P.redraw(state)
+  P.anim = false
   screen.clear()
   screen.font_face(1)
   screen.font_size(8)

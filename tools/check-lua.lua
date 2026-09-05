@@ -287,7 +287,7 @@ check("holding several steps locks all of them, silently", function()
   st.tracks[1]:set_machine(1)
   local sq = st.seq()
   sq:clear()
-  st.set_page(3)                            -- KICK / SYNTH
+  st.set_page(4)                            -- KICK / SYNTH
   st.cursor = 1                             -- TUNE
   local sp = st.cur_spec()
   local before = engine_calls.pset or 0
@@ -417,7 +417,7 @@ end)
 check("holding a step and turning E3 writes a parameter lock", function()
   local st = state
   st.tracks[st.sel]:set_machine(1)
-  st.set_page(3)
+  st.set_page(4)                         -- KICK / SYNTH
   st.cursor = 1
   G.g.key(1, 1, 1)                       -- create + hold step 1
   local sp = st.cur_spec()
@@ -430,7 +430,7 @@ check("holding a step and turning E3 writes a parameter lock", function()
     st.cursor = c
     enc(3, 2)
   end
-  local seqlocked = step.ratchet or step.gate or step.prob
+  local seqlocked = step.ratchet or step.prob
   assert(seqlocked, "no sequencer setting locked to the step")
   local v0 = step.vel
   enc(1, 3)
@@ -511,6 +511,83 @@ check("transport runs every sequencer", function()
     end
   end
   st.stop()
+end)
+
+-- HOLD is the one sequencer feature that changes the shape of the run loop,
+-- so it is checked by running it: the playhead has to sit still for exactly
+-- as many pulses as the step asks for, and REPEAT has to sound on each.
+check("a held step stalls the playhead and repeats on every pulse", function()
+  local st = state
+  st.stop()
+  st.select_track(1)
+  local t = st.tracks[1]
+  t:set_machine(1)
+  local sq = t:seq()
+  sq:clear()
+  sq.s.length, sq.s.speed, sq.s.swing, sq.s.dir, sq.s.rotate = 4, 5, 0, 0, 0
+  for i = 1, 4 do sq:ensure(i) end
+  sq.steps[2].hold = 3
+  sq.steps[2].htype = 1                       -- REPEAT
+
+  local before = engine_calls.trig or 0
+  sq:start()
+  local co = coros[sq.clocks[1]]
+  local seen = {}
+  for k = 1, 5 do
+    coroutine.resume(co)
+    seen[k] = sq.last
+  end
+  sq:stop()
+
+  assert(seen[1] == 1, "first pulse played step " .. tostring(seen[1]))
+  for k = 2, 4 do
+    assert(seen[k] == 2, "pulse " .. k .. " left step 2 for " .. tostring(seen[k]))
+  end
+  assert(seen[5] == 3, "the hold did not release onto step 3, got "
+    .. tostring(seen[5]))
+  assert((engine_calls.trig or 0) - before == 5,
+    "REPEAT sounded " .. ((engine_calls.trig or 0) - before) .. " times, want 5")
+end)
+
+check("a time signature scales the step and groups the bar", function()
+  local sq = state.tracks[1]:seq()
+  sq.s.speed, sq.s.tsig = 5, 0                 -- x1, 4/4
+  assert(math.abs(sq:step_beats() - 0.25) < 1e-9, "4/4 x1 is not a 16th")
+  assert(sq:bar_steps() == 16, "4/4 x1 bar is " .. sq:bar_steps() .. ", want 16")
+  sq.s.tsig = 9                                -- 7/8
+  assert(math.abs(sq:step_beats() - 0.125) < 1e-9,
+    "7/8 did not halve the step: " .. sq:step_beats())
+  assert(sq:bar_steps() == 28, "7/8 x1 bar is " .. sq:bar_steps() .. ", want 28")
+  sq.s.tsig = 0
+end)
+
+check("an LFO pointed at BPM moves the tempo, and gives it back", function()
+  local LFO = tahned.lfo
+  local S2 = include("tahned/lib/core/spec")
+  -- earlier checks turn every cell of every page, BPM destinations included,
+  -- so start from a clean routing rather than from whatever they left
+  for _, tr in ipairs(state.tracks) do
+    for n = 0, 3 do
+      tr.v[56 + (n * 8) + 4] = S2.NULL_DEST
+      tr.v[56 + (n * 8) + 6] = S2.NULL_DEST
+    end
+  end
+  local t = state.tracks[1]
+  LFO.step(state.tracks, 1 / 30)               -- hand back anything still held
+  local base = params:get("clock_tempo")
+  LFO.step(state.tracks, 1 / 30)               -- settle the centre
+  t.v[60] = S2.BPM_DEST                        -- LFO 1 DEST A
+  t.v[61] = 63                                 -- DEP A, full swing
+  local moved = false
+  for _ = 1, 40 do
+    LFO.step(state.tracks, 1 / 30)
+    if math.abs(params:get("clock_tempo") - base) > 0.5 then moved = true end
+  end
+  assert(moved, "BPM never moved")
+  t.v[60] = S2.NULL_DEST
+  LFO.step(state.tracks, 1 / 30)
+  assert(math.abs(params:get("clock_tempo") - base) < 0.01,
+    "the tempo was not handed back: " .. params:get("clock_tempo"))
 end)
 
 check("serialize round trip", function()

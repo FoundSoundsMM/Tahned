@@ -37,15 +37,21 @@ postInlineWarnings: false
 CONF
 
 # the bus contents come from the script itself, not from numbers typed here
-lua "$ROOT/tools/dump-defaults.lua" kick       > "$WORK/bus-kick-default.txt"
-lua "$ROOT/tools/dump-defaults.lua" kick 9=0.5 > "$WORK/bus-kick-flat.txt"
+lua "$ROOT/tools/dump-defaults.lua" kick            > "$WORK/bus-kick-default.txt"
+lua "$ROOT/tools/dump-defaults.lua" kick 9=0.5      > "$WORK/bus-kick-flat.txt"
+# CLICK is a noise burst on the front of the hit and it owns the zero
+# crossings for the first few milliseconds, which is exactly where the sweep
+# has to be measured. These two are the same kick with the transient off.
+lua "$ROOT/tools/dump-defaults.lua" kick 14=0       > "$WORK/bus-kick-body.txt"
+lua "$ROOT/tools/dump-defaults.lua" kick 9=0.5 14=0 > "$WORK/bus-kick-bodyflat.txt"
 for m in snare hat tom cymb tone; do
   lua "$ROOT/tools/dump-defaults.lua" "$m" > "$WORK/bus-$m.txt"
 done
 
 "$SC" -l "$WORK/conf.yaml" "$ROOT/tools/check-voice.scd" "$WORK" 2>&1 \
   | grep -iE "^wrote|ERROR|Exception" || true
-for n in kick-default kick-flat snare hat tom cymb tone-held tone-live; do
+for n in kick-default kick-flat kick-body kick-bodyflat snare hat tom cymb \
+         tone-held tone-live; do
   rm -f "$WORK/voice-$n.wav"
   # scsynth segfaults on teardown after writing the file, so judge the render
   # by whether the wav appeared rather than by the exit code
