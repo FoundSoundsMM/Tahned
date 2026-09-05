@@ -613,6 +613,9 @@ Engine_Tahned : CroneEngine {
 			spread = 0.7, fbk = 0.2, tone = 0.6, level = 1|
 			var sig = In.ar(in, 2), fb = LocalIn.ar(2), wet;
 			var base = 0.008;
+			// all eight tracks can be sending at once, so bound the sum before
+			// it reaches anything with feedback in it
+			sig = Limiter.ar(LeakDC.ar(sig), 0.9, 0.01);
 			sig = sig + (fb * fbk.clip(0, 0.85));
 			wet = (0..2).collect { |i|
 				var ph = i / 3;
@@ -621,37 +624,64 @@ Engine_Tahned : CroneEngine {
 			};
 			wet = Mix(wet) / 3;
 			wet = LPF.ar(wet, tone.linexp(0, 1, 900, 16000));
-			LocalOut.ar(wet);
-			Out.ar(out, wet * level);
+			LocalOut.ar(LeakDC.ar(wet));
+			Out.ar(out, Limiter.ar(wet * level, 0.95, 0.01));
 		}).add;
 
 		// ============================================================ DELAY
 		SynthDef(\tahned_delay, { |in = 0, out = 0, time = 0.375, fbk = 0.45,
 			hp = 0.15, lp = 0.75, ping = 0, mod = 0.1, level = 1|
 			var sig = In.ar(in, 2), fb = LocalIn.ar(2), t, d;
+			sig = Limiter.ar(LeakDC.ar(sig), 0.9, 0.01);
 			t = Lag.kr(time, 0.25);
 			t = t * (1 + (LFNoise2.kr(0.3 ! 2) * mod * 0.02));
 			d = DelayC.ar(sig + (fb * fbk.clip(0, 0.98)), 8, t.clip(0.001, 8));
 			d = HPF.ar(d, hp.linexp(0, 1, 20, 2000));
 			d = LPF.ar(d, lp.linexp(0, 1, 400, 17000));
-			d = (d * (1.4)).tanh * 0.8;
-			LocalOut.ar(SelectX.ar(ping, [d, [d[1], d[0]]]));
-			Out.ar(out, d * level);
+			// Soft clip with unity small signal gain. Scaling up after a tanh
+			// would put the loop over unity on its own and self oscillate,
+			// which is a saturated drone rather than a decaying repeat.
+			d = (d * 1.5).tanh / 1.5;
+			LocalOut.ar(LeakDC.ar(SelectX.ar(ping, [d, [d[1], d[0]]])));
+			Out.ar(out, Limiter.ar(d * level, 0.95, 0.01));
 		}).add;
 
 		// =========================================================== REVERB
-		// shimmer: pitch shifted copy folded back into the tail
+		// Shimmer: a pitch shifted copy of the tail folded back in.
+		//
+		// FreeVerb carries its own decay, so SIZE alone sets the tail length
+		// and only the pitch shifted path is fed back. Wrapping a broadband
+		// loop around the whole reverb, as this first did, makes the two
+		// decays multiply into a runaway rather than a longer tail.
+		//
+		// FreeVerb's sustained gain climbs steeply with room -- its comb
+		// feedback is 0.28*room+0.7 and each of the eight combs is scaled by
+		// 0.015, so gain ~= 0.12 / (0.3 - 0.28*room), which passes 3 at the
+		// top of the range. The shimmer feedback therefore has to shrink as
+		// the room grows, or the two compound. SHIM FBK is scaled to keep the
+		// round trip at 0.8 at worst, and the loop is soft clipped with unity
+		// small signal gain and DC blocked so it can only shed energy.
 		SynthDef(\tahned_reverb, { |in = 0, out = 0, size = 0.7, damp = 0.4,
-			shim = 0.3, interval = 12, decay = 0.65, pre = 0.02, lowcut = 0.1, level = 1|
-			var sig = In.ar(in, 2), fb = LocalIn.ar(2), verb, sh, fed;
+			shim = 0.3, interval = 12, shimfb = 0.5, pre = 0.02,
+			lowcut = 0.1, level = 1|
+			var sig = In.ar(in, 2), fb = LocalIn.ar(2), verb, sh, node, room, g;
+			// every track can be sending at once, so bound the sum first
+			sig = Limiter.ar(LeakDC.ar(sig), 0.9, 0.01);
 			sig = DelayC.ar(sig, 0.5, pre.clip(0, 0.45));
-			fed = sig + (fb * decay.clip(0, 0.95));
-			fed = LPF.ar(fed, damp.linexp(0, 1, 16000, 900));
-			fed = HPF.ar(fed, lowcut.linexp(0, 1, 20, 900));
-			verb = FreeVerb2.ar(fed[0], fed[1], 1, size.clip(0, 0.97), 0.35);
-			sh = PitchShift.ar(verb, 0.1, 2 ** (interval / 12), 0, 0.008);
-			LocalOut.ar((verb * (1 - shim)) + (sh * shim));
-			Out.ar(out, verb * level);
+
+			room = size.linlin(0, 1, 0.1, 0.93);
+			node = sig + fb;
+			node = LPF.ar(node, damp.linexp(0, 1, 16000, 900));
+			node = HPF.ar(node, lowcut.linexp(0, 1, 20, 900));
+			verb = FreeVerb2.ar(node[0], node[1], 1, room, 0.3);
+
+			sh = PitchShift.ar(verb, 0.12, 2 ** (interval / 12), 0, 0.01);
+			g = shimfb.clip(0, 1) * shim.clip(0, 1)
+				* (0.8 / (0.12 / (0.3 - (room * 0.28)))).clip(0.02, 0.9);
+			LocalOut.ar(LeakDC.ar(((sh * g) * 2).tanh / 2));
+
+			// FreeVerb's wet-only output sits well below its input
+			Out.ar(out, Limiter.ar(verb * level * 1.6, 0.95, 0.01));
 		}).add;
 	}
 

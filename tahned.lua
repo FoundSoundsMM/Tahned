@@ -43,9 +43,9 @@ local FX = {
   rev = { name = "reverb", p = {
     { "size",     "SIZE",     controlspec.new(0, 0.97, "lin", 0, 0.7, "") },
     { "damp",     "DAMP",     controlspec.new(0, 1, "lin", 0, 0.4, "") },
-    { "decay",    "DECAY",    controlspec.new(0, 0.95, "lin", 0, 0.65, "") },
     { "shim",     "SHIMMER",  controlspec.new(0, 1, "lin", 0, 0.3, "") },
     { "interval", "SHIM INT", controlspec.new(-12, 24, "lin", 1, 12, "st") },
+    { "shimfb",   "SHIM FBK", controlspec.new(0, 1, "lin", 0, 0.5, "") },
     { "pre",      "PREDELAY", controlspec.new(0, 0.45, "lin", 0, 0.02, "s") },
     { "lowcut",   "LOW CUT",  controlspec.new(0, 1, "lin", 0, 0.1, "") },
     { "level",    "LEVEL",    controlspec.new(0, 1, "lin", 0, 1, "") },

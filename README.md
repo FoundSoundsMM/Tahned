@@ -91,6 +91,11 @@ Three sends — chorus, delay, and a reverb with pitch-shifted feedback for
 shimmer — live in the norns params menu, along with a per-track colour chain of
 bit and rate reduction, tape wow and flutter, saturation and compression.
 
+On the reverb, **SIZE** sets the tail on its own and **SHIM FBK** regenerates
+only the pitch-shifted path. They are deliberately not the same control: a
+broadband loop around a reverb that already has its own decay multiplies the
+two into a runaway rather than lengthening the tail.
+
 ## How the engine is wired
 
 One SuperCollider engine drives all eight tracks. Each track owns a
@@ -131,6 +136,14 @@ of every machine, page navigation, encoder edits, grid presses, parameter
 locking, a run of all three sequencer types, and a save/load round trip. Its
 `include()` deliberately does not cache, matching norns, so module-identity
 mistakes surface here too.
+
+```bash
+./tools/check-fx.sh
+```
+
+Renders each send effect offline through `scsynth -N` — one second of noise
+then silence, at the most extreme settings the params allow — and checks the
+feedback loops decay, stay under full scale, and still leave a usable tail.
 
 ```bash
 lua tools/render-screen.lua preview   # then open preview/index.html
