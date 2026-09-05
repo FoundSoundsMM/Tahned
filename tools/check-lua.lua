@@ -1,0 +1,264 @@
+-- Smoke test for the lua side, run on a desktop with plain lua.
+--
+-- Stubs enough of the norns API to actually execute the script: init, a run
+-- of the sequencers, grid presses, encoder turns, page navigation and a
+-- redraw of every page of every machine. Parsing does not catch nil fields
+-- and wrong call shapes; running does.
+--
+-- include() deliberately does NOT cache, matching norns, so module-identity
+-- mistakes show up here too.
+--
+--   lua tools/check-lua.lua
+
+local ROOT = (arg[0]:match("(.*)/tools/") or ".")
+
+-- ------------------------------------------------------------------- stubs
+
+function include(path)
+  local f = path:gsub("^tahned/", "")
+  return dofile(ROOT .. "/" .. f .. ".lua")
+end
+
+local now = 0
+util = {
+  clamp = function(v, lo, hi) return math.min(math.max(v, lo), hi) end,
+  round = function(v) return math.floor(v + 0.5) end,
+  linlin = function(a, b, c, d, v)
+    if b == a then return c end
+    return c + ((d - c) * ((v - a) / (b - a)))
+  end,
+  time = function() now = now + 0.01 return now end,
+  file_exists = function() return true end,
+}
+
+local draws = 0
+screen = setmetatable({}, { __index = function() return function() draws = draws + 1 end end })
+
+local engine_calls = {}
+engine = setmetatable({ name = "" }, { __index = function(_, k)
+  return function(...) engine_calls[k] = (engine_calls[k] or 0) + 1 end
+end })
+
+local gled = 0
+local gobj = {
+  led = function() gled = gled + 1 end,
+  all = function() end,
+  refresh = function() end,
+}
+grid = { connect = function() return gobj end }
+
+local coros = {}
+clock = {
+  run = function(f, ...)
+    local co = coroutine.create(f)
+    table.insert(coros, co)
+    coroutine.resume(co, ...)
+    return #coros
+  end,
+  sleep = function() coroutine.yield() end,
+  sync = function() coroutine.yield() end,
+  cancel = function() end,
+  get_beat_sec = function() return 0.5 end,
+  get_tempo = function() return 120 end,
+}
+
+metro = { init = function(f, t) return { start = function() end, stop = function() end, f = f } end }
+controlspec = { new = function(a, b, c, d, e, u)
+  return { minval = a, maxval = b, default = e or a } end }
+
+local param_actions = {}
+params = {
+  add_separator = function() end,
+  add_group = function() end,
+  add_control = function() end,
+  add_trigger = function() end,
+  set_action = function(_, id, f) param_actions[id] = f end,
+  delta = function() end,
+  bang = function() for _, f in pairs(param_actions) do f(0.5) end end,
+}
+setmetatable(params, { __index = function() return function() end end })
+
+norns = { state = { data = "/tmp/", path = ROOT, shortname = "tahned" } }
+tab = { save = function() end, load = function() return nil end }
+
+local SCALES = {}
+for _, n in ipairs({ "Major", "Natural Minor", "Dorian", "Phrygian", "Lydian",
+                     "Mixolydian", "Locrian", "Whole Tone", "Major Pentatonic" }) do
+  table.insert(SCALES, { name = n })
+end
+package.preload["musicutil"] = function()
+  return {
+    SCALES = SCALES,
+    generate_scale = function(root, name, oct)
+      local t = {}
+      local iv = { 0, 2, 4, 5, 7, 9, 11 }
+      for o = 0, (oct or 1) - 1 do
+        for _, i in ipairs(iv) do table.insert(t, root + (o * 12) + i) end
+      end
+      return t
+    end,
+    note_num_to_freq = function(n) return 440 * (2 ^ ((n - 69) / 12)) end,
+    snap_note_to_array = function(n, a)
+      local best, bd = a[1], math.huge
+      for _, v in ipairs(a) do
+        local d = math.abs(v - n)
+        if d < bd then best, bd = v, d end
+      end
+      return best
+    end,
+  }
+end
+
+-- --------------------------------------------------------------------- run
+
+local fails = 0
+local function check(what, fn)
+  local ok, err = pcall(fn)
+  if ok then
+    print(string.format("  ok    %s", what))
+  else
+    fails = fails + 1
+    print(string.format("  FAIL  %s\n        %s", what, err))
+  end
+end
+
+dofile(ROOT .. "/tahned.lua")
+
+print("tahned lua smoke test")
+check("init", function() init() end)
+
+-- include() would hand back a fresh, uninitialised copy of each module, so
+-- everything below goes through the live ones the script exposes
+local state = tahned.state
+local G = tahned.grid
+
+check("every page of every machine redraws", function()
+  local st = state
+  for t = 1, 8 do
+    for m = 1, 3 do
+      st.tracks[t]:set_machine(m)
+      st.select_track(t)
+      for p = 1, #st.tracks[t].pages do
+        st.set_page(p)
+        for c = 1, 8 do
+          st.cursor = c
+          redraw()
+        end
+      end
+    end
+  end
+end)
+
+check("page navigation clamps at both ends", function()
+  local st = state
+  st.select_track(1)
+  for _ = 1, 40 do key(2, 1); key(2, 0) end
+  assert(st.page() == 1, "page ran off the front: " .. st.page())
+  for _ = 1, 40 do key(3, 1); key(3, 0) end
+  assert(st.page() == #st.tracks[1].pages, "page ran off the back")
+end)
+
+check("K2+K3 toggles select mode", function()
+  local st = state
+  key(2, 1); key(3, 1); key(3, 0); key(2, 0)
+  assert(st.mode == "select", "did not enter select")
+  key(2, 1); key(3, 1); key(3, 0); key(2, 0)
+  assert(st.mode == "page", "did not leave select")
+end)
+
+check("encoders move cursor and edit values on every page", function()
+  local st = state
+  for m = 1, 3 do
+    st.tracks[1]:set_machine(m)
+    for p = 1, #st.tracks[1].pages do
+      st.set_page(p)
+      for c = 1, 8 do
+        st.cursor = c
+        enc(3, 1); enc(3, -1); enc(3, 5)
+      end
+      enc(2, 1); enc(2, -1)
+    end
+  end
+  enc(1, 1); enc(1, -1)
+end)
+
+check("grid draws and takes presses for each machine", function()
+  local st = state
+  for m = 1, 3 do
+    st.tracks[st.sel]:set_machine(m)
+    G.redraw()
+    for y = 1, 8 do
+      for x = 1, 16 do
+        G.g.key(x, y, 1)
+        G.g.key(x, y, 0)
+      end
+    end
+    G.redraw()
+  end
+end)
+
+check("holding a step and turning E3 writes a parameter lock", function()
+  local st = state
+  st.tracks[st.sel]:set_machine(1)
+  st.set_page(3)
+  st.cursor = 1
+  G.g.key(1, 1, 1)                       -- create + hold step 1
+  local sp = st.cur_spec()
+  enc(3, 4)
+  local step = st.seq():get_step(1)
+  assert(step and step.lock and step.lock[sp.ch], "no lock written")
+  -- sequencer settings lock per step too, and E1 is velocity while held
+  st.set_page(2)
+  for c = 1, 8 do
+    st.cursor = c
+    enc(3, 2)
+  end
+  local seqlocked = step.ratchet or step.gate or step.prob
+  assert(seqlocked, "no sequencer setting locked to the step")
+  local v0 = step.vel
+  enc(1, 3)
+  assert(step.vel ~= v0, "E1 did not set step velocity")
+  local sel0 = st.sel
+  G.g.key(1, 1, 0)
+  assert(st.lock_step == nil, "lock target not released")
+  enc(1, 1)
+  assert(st.sel ~= sel0, "E1 did not return to track select")
+end)
+
+check("select mode grid selects tracks, machines, mutes, transport", function()
+  local st = state
+  st.mode = "select"
+  G.redraw()
+  G.g.key(1, 5, 1); G.g.key(1, 5, 0)
+  assert(st.sel == 5, "track select failed")
+  G.g.key(11, 5, 1); G.g.key(11, 5, 0)
+  assert(st.tracks[5].machine == 2, "machine select failed")
+  G.g.key(14, 5, 1); G.g.key(14, 5, 0)
+  assert(st.tracks[5].mute == true, "mute failed")
+  G.g.key(14, 5, 1); G.g.key(14, 5, 0)
+  st.mode = "page"
+end)
+
+check("transport runs every sequencer", function()
+  local st = state
+  for i = 1, 8 do st.tracks[i]:set_machine(((i - 1) % 3) + 1) end
+  st.start()
+  -- pump the clock coroutines the way norns would
+  for _ = 1, 200 do
+    for _, co in ipairs(coros) do
+      if coroutine.status(co) == "suspended" then coroutine.resume(co) end
+    end
+  end
+  st.stop()
+end)
+
+check("serialize round trip", function()
+  local st = state
+  local d = st.serialize()
+  st.deserialize(d)
+end)
+
+print(string.format("\n%s  (%d screen ops, %d grid leds, %d engine call sites)",
+  fails == 0 and "PASS" or ("FAIL: " .. fails), draws, gled,
+  (function() local n = 0 for _ in pairs(engine_calls) do n = n + 1 end return n end)()))
+os.exit(fails == 0 and 0 or 1)

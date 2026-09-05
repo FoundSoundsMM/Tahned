@@ -35,6 +35,7 @@ Engine_Tahned : CroneEngine {
 	var <mBus;                 // Array[nTracks] of 96ch modulation bus (LFO sum)
 	var <ctlGroup, <voiceGroup;
 	var <clearS, <lfoS;
+	var <nzBuf;                // fixed noise, for repeatable drum hits
 
 	*initClass {
 		fTypes = [\lp, \bp, \hp, \cmb];
@@ -63,9 +64,9 @@ Engine_Tahned : CroneEngine {
 	}
 
 	// phase-modulated operator
-	*op { arg freq, pm, w;
+	*op { arg freq, pm, w, iphase = 0;
 		var ph = Phasor.ar(0, freq * SampleDur.ir, 0, 1);
-		^Engine_Tahned.oplWave((ph + pm).wrap(0, 1), w);
+		^Engine_Tahned.oplWave((ph + pm + iphase).wrap(0, 1), w);
 	}
 
 	// Lower-triangular routing coefficients for a 4 operator algorithm.
@@ -123,8 +124,12 @@ Engine_Tahned : CroneEngine {
 		);
 	}
 
-	// ratio table shared by perc + tone
-	*ratios { ^[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 11, 16] }
+	// The YMF262's own frequency multipliers. The chip has 16 register values
+	// but repeats 10, 12 and 15, so those duplicates are dropped here.
+	*mults { ^[0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15] }
+
+	// percussion wants inharmonic ratios the chip never had
+	*ratios { ^[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 5, 6, 8, 11] }
 
 	// -------------------------------------------------------------- alloc
 	alloc {
@@ -134,6 +139,10 @@ Engine_Tahned : CroneEngine {
 		ftype   = Array.fill(nTracks, { 0 });
 		voices  = Array.fill(nTracks, { IdentityDictionary.new });
 		drone   = Array.newClear(nTracks);
+
+		// one second of noise, so NOISE RESET can make a hit sound identical
+		nzBuf = Buffer.alloc(s, s.sampleRate, 1);
+		nzBuf.sine1(Array.fill(64, { 1.0.rand }), true, true, true);
 
 		pBus = Array.fill(nTracks, { Bus.control(s, nCh) });
 		mBus = Array.fill(nTracks, { Bus.control(s, nCh) });
@@ -178,87 +187,113 @@ Engine_Tahned : CroneEngine {
 
 	// ------------------------------------------------------------ synthdefs
 	buildDefs { arg s;
-		var rat = Engine_Tahned.ratios;
+		var rat = Engine_Tahned.ratios;      // percussion
+		var mul = Engine_Tahned.mults;       // the chip's own, for tone
 
 		fTypes.do { |ft|
 
 			// ============================================================ PERC
-			// 3 operator FM percussion.  pitch sweep, wavefold, noise + transient.
-			SynthDef(("tahned_perc_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0, vel = 1, note = 36|
+			// Three operator FM percussion, laid out the way the machine this
+			// borrows from does it: each modulator carries its own decay
+			// envelope with an end level and its own modulation amount, which
+			// is what gives FM drums their snap.
+			SynthDef(("tahned_perc_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0,
+				vel = 1, note = 36, nzbuf = 0|
 				var p = Latch.kr(In.kr(bus, nCh) + In.kr(mbus, nCh), Impulse.kr(0));
-				// syn1
-				var tune   = p[8].linlin(0, 1, -24, 24);
-				var bendT  = p[9].linexp(0, 1, 0.002, 1.2);
-				var bendD  = (p[10] * 2) - 1;
-				var algo   = p[11].round.clip(0, 7);
-				var waveC  = p[12].round.clip(0, 7);
-				var waveM  = p[13].round.clip(0, 7);
-				var fbk    = p[14];
-				var fold   = p[15];
-				// syn2
-				var ratA   = Select.kr(p[16].round.clip(0, 15), rat);
-				var ratB   = Select.kr(p[17].round.clip(0, 15), rat);
-				var index  = p[18].linlin(0, 1, 0, 5);
-				var decay  = p[19].linexp(0, 1, 0.01, 6);
-				var hold   = p[20].linexp(0, 1, 0.0005, 1.5);
-				var lvlB   = p[21];
-				var atk    = p[22].linexp(0, 1, 0.0002, 0.4);
-				var crv    = p[23].linlin(0, 1, 0, -12);
-				// syn3
-				var nzLvl  = p[24];
-				var nzDec  = p[25].linexp(0, 1, 0.003, 3);
-				var nzCol  = p[26].linexp(0, 1, 80, 14000);
-				var nzRes  = p[27];
-				var trType = p[28].round.clip(0, 3);
-				var trLvl  = p[29];
-				var trDec  = p[30].linexp(0, 1, 0.0008, 0.08);
-				var mix    = p[31];
+				// syn1  fm
+				var tune  = p[8].linlin(0, 1, -24, 24);
+				var stim  = p[9].linexp(0, 1, 0.002, 1.2);
+				var sdep  = (p[10] * 2) - 1;
+				var algo  = p[11].round.clip(0, 7);
+				var waveC = p[12].round.clip(0, 7);
+				var waveM = p[13].round.clip(0, 7);
+				var fdbk  = p[14];
+				var fold  = p[15];
+				// syn2  one modulation envelope per operator
+				var ratA = Select.kr(p[16].round.clip(0, 15), rat);
+				var decA = p[17].linexp(0, 1, 0.002, 4);
+				var endA = p[18];
+				var modA = p[19];
+				var ratB = Select.kr(p[20].round.clip(0, 15), rat);
+				var decB = p[21].linexp(0, 1, 0.002, 4);
+				var endB = p[22];
+				var modB = p[23];
+				// syn3  body
+				var bhld = p[24].linexp(0, 1, 0.0005, 2);
+				var bdec = p[25].linexp(0, 1, 0.005, 8);
+				var phC  = p[26];
+				var blev = p[27];
+				var nrst = p[28].round.clip(0, 1);
+				var nrm  = p[29].round.clip(0, 1);
+				var batk = p[30].linexp(0, 1, 0.0002, 0.3);
+				var bcrv = p[31].linlin(0, 1, 0, -12);
+				// syn4  noise and transient
+				var nhld  = p[32].linexp(0, 1, 0.0005, 1);
+				var ndec  = p[33].linexp(0, 1, 0.003, 6);
+				var tran  = p[34].round.clip(0, 3);
+				var tlev  = p[35];
+				var nbase = p[36].linexp(0, 1, 40, 8000);
+				var nwdth = p[37];
+				var ngran = p[38];
+				var nlev  = p[39];
 				// filter
-				var cut    = p[41].linexp(0, 1, 30, 16000);
-				var res    = p[42];
-				var fEnvA  = (p[43] * 2) - 1;
-				var fAtk   = p[44].linexp(0, 1, 0.0005, 0.5);
-				var fDec   = p[45].linexp(0, 1, 0.005, 3);
-				var ktrk   = p[46];
-				var fDrv   = p[47];
+				var cut   = p[41].linexp(0, 1, 30, 16000);
+				var res   = p[42];
+				var fEnvA = (p[43] * 2) - 1;
+				var fAtk  = p[44].linexp(0, 1, 0.0005, 0.5);
+				var fDec  = p[45].linexp(0, 1, 0.005, 3);
+				var ktrk  = p[46];
+				var fDrv  = p[47];
 
 				var a3 = Engine_Tahned.algo3(algo);
 				var cBA = a3[0], cCA = a3[1], cCB = a3[2];
 				var oC = a3[3], oA = a3[4], oB = a3[5];
 
 				var base = (note + tune).midicps;
-				var sweep = EnvGen.ar(Env([1, 0], [bendT], [-4]));
-				var f = base * (2 ** (sweep * bendD * 4));
+				var sweep = EnvGen.ar(Env([1, 0], [stim], [-4]));
+				var f = base * (2 ** (sweep * sdep * 4));
 
-				var opB, opA, opC, sig, nz, tr, body, nzEnv, fEnv, fb;
+				// phase reset for operator C: 0..90 degrees, or free running
+				var phase = Select.kr(phC > 0.99, [phC.linlin(0, 0.99, 0, 0.25), Rand(0, 1)]);
+
+				var envA = EnvGen.ar(Env([1, endA], [decA], [-4]));
+				var envB = EnvGen.ar(Env([1, endB], [decB], [-4]));
+				var opA, opB, opC, sig, body, nz, nzEnv, tr, fEnv, fb;
 
 				fb = LocalIn.ar(1);
-				opB = Engine_Tahned.op(f * ratB, fb * fbk * 0.4, waveM);
+				opB = Engine_Tahned.op(f * ratB, fb * fdbk * 0.4, waveM) * envB;
 				LocalOut.ar(opB);
+				opA = Engine_Tahned.op(f * ratA, opB * cBA * modB * 4, waveM) * envA;
+				opC = Engine_Tahned.op(f,
+					((opA * cCA * modA) + (opB * cCB * modB)) * 4, waveC, phase);
 
-				opA = Engine_Tahned.op(f * ratA, opB * cBA * index * 0.25, waveM);
-				opC = Engine_Tahned.op(f, ((opA * cCA) + (opB * cCB * lvlB)) * index * 0.25, waveC);
+				sig = (opC * oC) + (opA * oA * modA) + (opB * oB * modB);
 
-				sig = (opC * oC) + (opA * oA) + (opB * oB * lvlB);
-
-				// wavefold -- tonal part only, transient + noise stay clean
+				// wavefold applies to the body only; noise and transient stay clean
 				sig = Fold.ar(sig * (1 + (fold * 8)), -1, 1) * (1 / (1 + (fold * 2.5)));
+				body = EnvGen.ar(Env([0, 1, 1, 0], [batk, bhld, bdec], [2, 0, bcrv]));
+				sig = sig * body * blev;
 
-				body = EnvGen.ar(Env([0, 1, 1, 0], [atk, hold, decay], [2, 0, crv]));
-				sig = sig * body;
+				// noise reset plays a fixed buffer so a hit can be repeatable
+				nz = Select.ar(nrst, [
+					WhiteNoise.ar,
+					PlayBuf.ar(1, nzbuf, 1, 1, 0, loop: 1)
+				]);
+				// grain: latching the noise thins white down to something coarse
+				nz = Latch.ar(nz, Impulse.ar(ngran.linexp(0, 1, 20000, 200)));
+				nz = LPF.ar(HPF.ar(nz, nbase), (nbase * (1 + (nwdth * 30))).clip(40, 18000));
+				nz = nz * Select.ar(nrm, [DC.ar(1), opC]);
+				nzEnv = EnvGen.ar(Env([0, 1, 1, 0], [0.0005, nhld, ndec], [0, 0, -4]));
+				nz = nz * nzEnv * nlev;
 
-				nzEnv = EnvGen.ar(Env.perc(0.0003, nzDec, 1, -4));
-				nz = BPF.ar(WhiteNoise.ar, nzCol, (1 - (nzRes * 0.95)).max(0.05)) * (1 + nzRes);
-				nz = nz * nzEnv * nzLvl;
+				tr = Select.ar(tran, [
+					Impulse.ar(0) * 6,
+					HPF.ar(WhiteNoise.ar, 5000) * EnvGen.ar(Env.perc(0.0001, 0.006)),
+					SinOsc.ar(EnvGen.ar(Env([2400, 180], [0.012], [-8]))),
+					Ringz.ar(Impulse.ar(0), 2600 * [1, 1.71], 0.05).sum * 0.4
+				]) * tlev;
 
-				tr = Select.ar(trType, [
-					Impulse.ar(0) * 6,                                             // click
-					HPF.ar(WhiteNoise.ar, 5000) * EnvGen.ar(Env.perc(0.0001, trDec)),  // tick
-					SinOsc.ar(EnvGen.ar(Env([2400, 180], [trDec * 2], [-8]))),     // thump
-					Ringz.ar(Impulse.ar(0), 2600 * [1, 1.71], trDec * 12).sum * 0.4 // metal
-				]) * trLvl;
-
-				sig = (sig * (1 - (mix * 0.5))) + nz + tr;
+				sig = sig + nz + tr;
 
 				fEnv = EnvGen.ar(Env([0, 1, 0], [fAtk, fDec], [2, -4]));
 				sig = Engine_Tahned.flt(ft, sig * (1 + (fDrv * 4)),
@@ -267,7 +302,8 @@ Engine_Tahned : CroneEngine {
 
 				sig = sig * vel.pow(1.4) * 0.7;
 				sig = sig * EnvGen.ar(Env([1, 1, 0],
-					[decay.max(nzDec).max(fDec) * 1.4 + 0.12, 0.02]), doneAction: 2);
+					[bhld + nhld + bdec.max(ndec).max(fDec) * 1.4 + 0.12, 0.02]),
+					doneAction: 2);
 				Out.ar(out, Pan2.ar(sig, 0));
 			}).add;
 
@@ -279,11 +315,11 @@ Engine_Tahned : CroneEngine {
 				var pl = Latch.kr(pm, Impulse.kr(0));
 				// syn1
 				var algo  = pl[8].round.clip(0, 7);
-				var r1 = Select.kr(pl[9].round.clip(0, 15), rat);
-				var r2 = Select.kr(pl[10].round.clip(0, 15), rat);
-				var r3 = Select.kr(pl[11].round.clip(0, 15), rat);
-				var r4 = Select.kr(pl[12].round.clip(0, 15), rat);
-				var fbk   = pc[13];
+				var r1 = Select.kr(pl[9].round.clip(0, 12), mul);
+				var r2 = Select.kr(pl[10].round.clip(0, 12), mul);
+				var r3 = Select.kr(pl[11].round.clip(0, 12), mul);
+				var r4 = Select.kr(pl[12].round.clip(0, 12), mul);
+				var fbk   = pc[13];                     // shown as the chip's 0..7
 				var det   = ((pc[14] * 2) - 1) * 0.03;
 				var fine  = ((pl[15] * 2) - 1) * 0.5;
 				// syn2
@@ -665,18 +701,11 @@ Engine_Tahned : CroneEngine {
 				.setAt(msg[2].asInteger.clip(0, nCh - 1), msg[3]);
 		});
 
-		// a whole page at once -- eight channels from a base offset
-		this.addCommand(\pset8, "iiffffffff", { |msg|
-			pBus[msg[1].asInteger.clip(0, nTracks - 1)]
-				.setAt(msg[2].asInteger.clip(0, nCh - 8),
-					msg[3], msg[4], msg[5], msg[6], msg[7], msg[8], msg[9], msg[10]);
-		});
-
 		this.addCommand(\trig, "iff", { |msg|
 			var t = msg[1].asInteger.clip(0, nTracks - 1);
 			Synth(this.defFor(t, "tahned_perc"), [
 				\bus, pBus[t].index, \mbus, mBus[t].index, \out, tBus[t].index,
-				\vel, msg[2], \note, msg[3]
+				\vel, msg[2], \note, msg[3], \nzbuf, nzBuf.bufnum
 			], vGroup[t]);
 			lfoS[t].set(\t_trig, 1);
 		});
@@ -743,5 +772,6 @@ Engine_Tahned : CroneEngine {
 		mBus.do(_.free);
 		tBus.do(_.free);
 		[choBus, dlyBus, revBus].do(_.free);
+		nzBuf.free;
 	}
 }
