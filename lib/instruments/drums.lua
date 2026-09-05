@@ -22,7 +22,7 @@ local kick = {
   pages = { { name = "SYNTH", params = {
     S.c(8,  "TUNE",   { min = -24, max = 24, def = -5, g = "bi", unit = "st" }),
     S.b(9,  "SWEEP",  { def = 31, g = "sweep" }),
-    S.c(10, "S.TIME", { def = 66, g = "rel" }),   -- ~40ms: an 808 glide
+    S.c(10, "S.TIME", { def = 72, g = "rel" }),   -- ~150ms: an 808 glide
     S.c(11, "DECAY",  { def = 85, g = "rel" }),
     S.c(12, "FM",     { def = 0 }),
     S.e(13, "RATIO",  S.RATIOS, { def = 3, g = "ratio" }),

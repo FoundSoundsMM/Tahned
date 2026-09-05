@@ -182,7 +182,11 @@ d, f = load("kick-body"), load("kick-bodyflat")
 if d and f:
     dsr, ds = d
     fsr, fs = f
-    dlate, flate = f0(ds, dsr, 0.05, 0.25), f0(fs, fsr, 0.05, 0.25)
+    # "Settled" has to start after the glide is over. S.TIME reaches 1.2s and
+    # sits at ~150ms by default, so a window opening at 50ms is still measuring
+    # the sweep; 0.25..0.45s is past it and still well inside the body, which
+    # runs about 0.6s at the decay this ships with.
+    dlate, flate = f0(ds, dsr, 0.25, 0.45), f0(fs, fsr, 0.25, 0.45)
     # A cycle count over 60ms is too blunt to tell a real sweep from a tick:
     # it read 3 against 2 while the drop was over in three milliseconds and
     # nobody could hear it. Compare the pitch of the front of the hit against

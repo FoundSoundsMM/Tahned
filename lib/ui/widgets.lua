@@ -270,6 +270,28 @@ function W.wow(x, y, w, h, sp, v, lv)
   end)
 end
 
+-- A delay time is a gap between repeats, not a shape that decays. Drawn as an
+-- envelope it said "something fades out", which is FEEDBK's job and is the one
+-- thing TIME does not control. This is the input and its echoes, spaced
+-- further apart as the time grows -- so a short delay is a dense run of taps
+-- and a long one is two or three.
+function W.dtime(x, y, w, h, sp, v, lv)
+  local gap = math.max(2, 2 + (pos(sp, v) * (w - 4)))
+  frame_line(x, y + h, w, 2)
+  screen.level(lv)
+  screen.move(x, y + h)
+  screen.line(x, y)
+  screen.stroke()
+  local a, px = 0.68, x + gap
+  while px < x + w do
+    screen.level(math.max(2, util.round(lv * a)))
+    screen.move(px, y + h)
+    screen.line(px, y + h - (h * a))
+    screen.stroke()
+    px, a = px + gap, a * 0.6
+  end
+end
+
 function W.comp(x, y, w, h, sp, v, lv)
   local r = pos(sp, v)
   screen.level(lv)
@@ -279,40 +301,44 @@ function W.comp(x, y, w, h, sp, v, lv)
   screen.stroke()
 end
 
--- filter response, shaped by the type sitting on channel 40
-function W.filt(x, y, w, h, sp, v, lv, ftype)
-  local c = pos(sp, v)
-  screen.level(lv)
-  local cx = x + (c * w)
-  ftype = ftype or 0
-  screen.move(x, y + h - 1)
-  if ftype == 0 then
-    screen.line(math.min(cx, x + w - 4), y + h - 1)
-    screen.line(math.min(cx + 2, x + w - 2), y)
-    screen.line(math.min(cx + 5, x + w), y + h)
-  elseif ftype == 2 then
-    screen.move(x, y + h)
-    screen.line(math.max(cx - 5, x), y + h)
-    screen.line(math.max(cx - 2, x + 2), y)
-    screen.line(x + w, y + h - 1)
-  elseif ftype == 1 then
-    screen.move(x, y + h)
-    screen.line(cx - 3, y + h)
-    screen.line(cx, y)
-    screen.line(cx + 3, y + h)
-    screen.line(x + w, y + h)
-  else
-    for i = 0, 4 do
-      local px = x + (i * w / 4) + (c * 2)
-      screen.move(px, y + h)
-      screen.line(px, y + (h * (i % 2) * 0.5))
+-- The filter type as its own symbol, and nothing else's. This used to draw
+-- the whole response with a resonant peak on it, which made it a second, worse
+-- picture of RES -- and put it next to CUTOFF drawing the same peak again, so
+-- two cells said one thing and neither said its own. What is left is the shape
+-- of the type with nothing resonating: the corner is where it is because that
+-- is where a symbol puts it, not because CUTOFF is anywhere near it.
+function W.ftype(x, y, w, h, sp, v, lv)
+  local top, bot = y + 0.5, y + h - 0.5
+  local function curve(x0, x1, y0, y1, n, e)
+    for i = 1, n do
+      local t = i / n
+      screen.line(x0 + (t * (x1 - x0)), y0 + ((y1 - y0) * (t ^ e)))
     end
   end
+  screen.level(lv)
+  if v == 1 then          -- BP: one band, rounded, no spike on top of it
+    screen.move(x, bot)
+    for i = 1, 14 do
+      local t = i / 14
+      screen.line(x + (t * w), bot - ((bot - top) * (math.sin(t * math.pi) ^ 1.3)))
+    end
+  elseif v == 2 then      -- HP: a rise into flat
+    screen.move(x, bot)
+    curve(x, x + (w * 0.55), bot, top, 8, 1.7)
+    screen.line(x + w, top)
+  elseif v == 3 then      -- COMB: evenly spaced notches
+    screen.move(x, bot)
+    for i = 1, 20 do
+      local t = i / 20
+      screen.line(x + (t * w),
+        bot - ((bot - top) * math.abs(math.sin(t * 4 * math.pi))))
+    end
+  else                    -- LP: flat, then a rolloff
+    screen.move(x, top)
+    screen.line(x + (w * 0.45), top)
+    curve(x + (w * 0.45), x + w, top, bot, 8, 1.7)
+  end
   screen.stroke()
-end
-
-function W.ftype(x, y, w, h, sp, v, lv)
-  W.filt(x, y, w, h, { min = 0, max = 1 }, 0.55, lv, v)
 end
 
 -- ------------------------------------------------------------- structural
@@ -460,7 +486,38 @@ function W.mach(x, y, w, h, sp, v, lv) end
 function W.enum(x, y, w, h, sp, v, lv) end
 function W.dest(x, y, w, h, sp, v, lv) end
 function W.leader(x, y, w, h, sp, v, lv) end
-function W.scale(x, y, w, h, sp, v, lv) end
+
+-- ROOT and SCALE are the song's key, so they draw the same twelve chromatic
+-- slots and differ only in what stands up out of them: one note for the root,
+-- the scale's own degrees for the scale.
+local function chroma(x, y, w, h)
+  screen.level(2)
+  for i = 0, 11 do screen.rect(x + (i * (w - 1) / 11), y + h - 1, 1, 1) end
+  screen.fill()
+end
+
+function W.root(x, y, w, h, sp, v, lv)
+  chroma(x, y, w, h)
+  screen.level(lv)
+  screen.rect(x + (util.round(pos(sp, v) * 11) * (w - 1) / 11), y, 1, h)
+  screen.fill()
+end
+
+-- `extra.intervals` is the scale's own interval list, so the cell shows which
+-- notes are in the scale rather than how far down a list of names it sits
+function W.scale(x, y, w, h, sp, v, lv, extra)
+  chroma(x, y, w, h)
+  local iv = extra and extra.intervals
+  if not iv then return end
+  screen.level(lv)
+  for _, n in ipairs(iv) do
+    local i = n % 12
+    local tall = (n % 12) == 0
+    screen.rect(x + (i * (w - 1) / 11), y + (tall and 0 or 2),
+      1, tall and h or (h - 2))
+  end
+  screen.fill()
+end
 -- the sharp front of a drum: a spike whose height is the transient level
 function W.click(x, y, w, h, sp, v, lv)
   local p = pos(sp, v)
@@ -486,18 +543,35 @@ function W.band(x, y, w, h, sp, v, lv)
   screen.stroke()
 end
 
--- how much of the signal survives a lossy codec: the top of the band eaten
--- away and what is left smeared
+-- A lossy codec does not shave the top off a band, it throws pieces of the
+-- signal away and puts the rest back slightly wrong -- so the glyph is one
+-- whole shape coming apart. At zero it is a clean wave. As the value climbs
+-- the wave breaks into fragments that slip out of line, and then fragments
+-- start going missing altogether.
 function W.loss(x, y, w, h, sp, v, lv)
   local p = pos(sp, v)
-  local edge = w * (1 - (p * 0.8))
-  screen.level(lv)
-  for i = 0, w - 1, 2 do
-    local a = (i < edge) and (1 - (p * 0.35 * (i / w))) or (p * 0.12)
-    screen.move(x + i, y + h)
-    screen.line(x + i, y + h - math.max(0.5, h * a))
+  local mid = y + (h / 2)
+  local amp = (h / 2) - 1
+  local seed = 0.271
+  local function rnd() seed = (seed * 9.13 + 0.271) % 1 return seed end
+  local function at(i, slip)
+    return util.clamp(mid - (math.sin((i / w) * 2 * math.pi) * amp) + slip,
+                      y, y + h)
   end
-  screen.stroke()
+  screen.level(lv)
+  local i = 0
+  while i < w do
+    local run = 2 + math.floor(rnd() * 3)
+    local gone = rnd() < (p * 0.5)
+    local slip = (rnd() - 0.5) * p * (h - 1)
+    if not gone then
+      local e = math.min(w, i + run)
+      screen.move(x + i, at(i, slip))
+      for k = i + 1, e do screen.line(x + k, at(k, slip)) end
+      screen.stroke()
+    end
+    i = i + run
+  end
 end
 
 -- digital dropout: a run of samples repeated, with a hole punched in it

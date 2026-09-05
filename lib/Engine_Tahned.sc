@@ -247,7 +247,7 @@ Engine_Tahned : CroneEngine {
 				var g = Latch.kr(In.kr(gbus, 8), Impulse.kr(0));
 				var tune = p[8].linlin(0, 1, -24, 24) + (g[0] * 24);
 				var sdep = (p[9] * 2) - 1;
-				var stim = p[10].linexp(0, 1, 0.002, 0.6) * (2 ** (g[2] * 2));
+				var stim = p[10].linexp(0, 1, 0.01, 1.2) * (2 ** (g[2] * 2));
 				var dec  = p[11].linexp(0, 1, 0.02, 4) * (2 ** (g[2] * 3));
 				var idx  = p[12] * (2 ** (g[3] * 2));
 				var rt   = Select.kr(p[13].round.clip(0, 15), rat);
@@ -255,13 +255,19 @@ Engine_Tahned : CroneEngine {
 				var pun  = p[15];
 				var atk  = 0.0008 * (2 ** (g[1] * 4));
 				var base = (note + tune).midicps;
-				// The drop, and it is the whole of what makes a kick a kick, so
-				// it is not zero by default. The curve is what makes S.TIME
-				// mean anything: at -4 the fall was over in the first fifth of
-				// the time set, so a 40ms sweep was heard as a 8ms tick and
-				// both controls looked inert. -2.5 spends the whole of it.
+				// The drop, and it is the whole of what makes a kick a kick.
+				// Two things had to be true before either control was worth
+				// turning. The time has to reach far enough to be heard as a
+				// pitch moving rather than as a click: over 0.002..0.6 the
+				// bottom half of S.TIME was all under 20ms, which is one cycle
+				// at the pitch a kick lands on, so most of the knob did
+				// nothing. And the depth has to stay inside the audio band --
+				// at four octaves the downward half started at 3Hz and the
+				// front of the hit was simply missing, which is the other way
+				// a control looks inert. Three octaves off a 49Hz fundamental
+				// still reaches 390Hz, which is as far up as a kick wants.
 				var swp  = EnvGen.ar(Env([1, 0], [stim], [-2.5]));
-				var f    = base * (2 ** (swp * sdep * 4));
+				var f    = base * (2 ** (swp * sdep * 3));
 				var mod, body, amp, click, sig;
 
 				mod  = Engine_Tahned.sop(f * rt) * idx;
