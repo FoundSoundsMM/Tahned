@@ -32,7 +32,7 @@ act with timbral consequences.
 ## Install
 
 ```
-;install https://github.com/<you>/tahned
+;install https://github.com/FoundSoundsMM/tahned
 ```
 
 Or clone into `~/dust/code/tahned`. Requires a grid 128 (16x8).
