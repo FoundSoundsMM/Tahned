@@ -10,7 +10,16 @@
 -- and transport.
 --
 -- Holding a step pad and turning an encoder writes a parameter lock onto that
--- step rather than changing the track. A quick press toggles the step.
+-- step rather than changing the track. A quick press toggles the step. Hold
+-- several pads and the lock lands on all of them at once.
+--
+-- A lock is never pushed at the engine as it is written: the track keeps its
+-- own value and the change is heard when the locked step comes round, so
+-- what you hear is always what the sequencer is playing.
+--
+-- Pads address *display* positions. ROTATE is a read-time offset, so the
+-- pattern under the pads slides with it and a pad always edits the step it
+-- is drawing.
 
 local S = include("tahned/lib/core/spec")
 
@@ -122,10 +131,10 @@ function G.redraw()
       local ln = sq.lane[l]
       local sel = (l == (sq.s.lane or 1))
       for x = 1, 16 do
-        local s = ln.steps[x]
+        local s = (x <= ln.length) and sq:disp_step(x, l) or nil
         local lv
         if x > ln.length then lv = 0
-        elseif x == ln.last then lv = 15
+        elseif x == ln.pos then lv = 15
         elseif s and s.on then lv = util.round(util.linlin(0, 127, 5, 12, s.vel or 100))
         else lv = ((x - 1) % 4 == 0) and (sel and 4 or 2) or (sel and 2 or 1) end
         if st8.held[l * 100 + x] then lv = 15 end
@@ -138,7 +147,7 @@ function G.redraw()
     for y = 1, 4 do
       for x = 1, 16 do
         local i = tone_step(x, y)
-        G.g:led(x, y, step_level(sq, sq.steps[i], i, sq.last, len, st8.held[i]))
+        G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len, st8.held[i]))
       end
     end
     -- keyboard: scale roots brighter, notes on the held step brighter still
@@ -161,7 +170,7 @@ function G.redraw()
     for y = 1, 8 do
       for x = 1, 16 do
         local i = perc_step(x, y)
-        G.g:led(x, y, step_level(sq, sq.steps[i], i, sq.last, len, st8.held[i]))
+        G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len, st8.held[i]))
       end
     end
   end
@@ -171,17 +180,32 @@ end
 
 -- ------------------------------------------------------------------ keys
 
-local function press_step(sq, idx, key, lane)
-  local st8 = G.state
-  local existing = sq:get_step(idx, lane)
-  if existing then
-    -- keep it, and let the hold become a parameter lock
-    st8.held[key] = { t = util.time(), idx = idx, lane = lane, existed = true, locked = false }
-  else
-    sq:ensure(idx, lane)
-    st8.held[key] = { t = util.time(), idx = idx, lane = lane, existed = false, locked = false }
+-- Presses are ordered so that when one of several held pads is let go, the
+-- screen falls back to the newest pad still down rather than to nothing.
+local press_n = 0
+
+local function focus_newest(st8)
+  local best
+  for _, h in pairs(st8.held) do
+    if not best or h.n > best.n then best = h end
   end
-  st8.lock_step, st8.lock_lane = idx, lane or 1
+  if best then
+    st8.lock_step, st8.lock_lane, st8.lock_pad = best.idx, best.lane or 1, best.pad
+  else
+    st8.lock_step, st8.lock_pad = nil, nil
+  end
+end
+
+-- `pad` is where the finger is, `idx` the step that pad is drawing: under
+-- ROTATE the two differ.
+local function press_step(sq, pad, idx, key, lane)
+  local st8 = G.state
+  press_n = press_n + 1
+  local existed = sq:get_step(idx, lane) ~= nil
+  if not existed then sq:ensure(idx, lane) end
+  st8.held[key] = { t = util.time(), n = press_n, pad = pad, idx = idx,
+                    lane = lane, existed = existed, locked = false }
+  focus_newest(st8)
   st8.dirty = true
 end
 
@@ -195,7 +219,7 @@ local function release_step(sq, key)
     local store = sq:store(h.lane or 1)
     store[h.idx] = nil
   end
-  if st8.lock_step == h.idx then st8.lock_step = nil end
+  focus_newest(st8)
   st8.dirty = true
 end
 
@@ -229,7 +253,8 @@ function G.key(x, y, z)
     local key = (y * 100) + x
     if z == 1 then
       sq.s.lane = y
-      press_step(sq, x, key, y)
+      if x > sq.lane[y].length then return end
+      press_step(sq, x, sq:disp(x, y), key, y)
     else
       release_step(sq, key)
     end
@@ -240,16 +265,17 @@ function G.key(x, y, z)
     local key = kb_key(x, y)
     if z == 1 then
       local n = G.kb_note(sq, x, y)
-      -- with a step held, the keyboard writes notes onto that step
+      -- with steps held, the keyboard writes notes onto all of them
       if st8.lock_step then
-        local step = sq:ensure(st8.lock_step)
-        step.notes = step.notes or {}
-        local found
-        for i, hn in ipairs(step.notes) do if hn == n then found = i end end
-        if found then table.remove(step.notes, found)
-        else table.insert(step.notes, n) end
-        local h = st8.held[st8.lock_step]
-        if h then h.locked = true end
+        for _, h in pairs(st8.held) do
+          local step = sq:ensure(h.idx, h.lane)
+          step.notes = step.notes or {}
+          local found
+          for i, hn in ipairs(step.notes) do if hn == n then found = i end end
+          if found then table.remove(step.notes, found)
+          else table.insert(step.notes, n) end
+          h.locked = true
+        end
         kb_press(st8, key, n, nil)
       else
         kb_press(st8, key, n, t)
@@ -262,9 +288,14 @@ function G.key(x, y, z)
     return
   end
 
-  local idx = perc_step(x, y)
-  if idx > sq.maxlen then return end
-  if z == 1 then press_step(sq, idx, idx) else release_step(sq, idx) end
+  local pad = perc_step(x, y)
+  if pad > sq.maxlen then return end
+  if z == 1 then
+    if pad > sq:length() then return end
+    press_step(sq, pad, sq:disp(pad), pad)
+  else
+    release_step(sq, pad)
+  end
 end
 
 -- ------------------------------------------------- encoder while holding
@@ -273,11 +304,15 @@ end
 -- direction describe the whole pattern, so they are not among them.
 local STEP_SEQ = { prob = true, ratchet = true, gate = true, density = true }
 
-local function mark_held(st8, sq)
-  local key = (sq.kind == "amb")
-    and ((st8.lock_lane * 100) + st8.lock_step) or st8.lock_step
-  local h = st8.held[key]
-  if h then h.locked = true end
+-- Every step currently held takes the edit, so a handful of pads can be
+-- locked together in one gesture.
+local function held_steps(st8, sq)
+  local out = {}
+  for _, h in pairs(st8.held) do
+    local step = sq:get_step(h.idx, h.lane)
+    if step then out[#out + 1] = { h = h, step = step } end
+  end
+  return out
 end
 
 -- returns true if the edit was captured as a parameter lock
@@ -286,35 +321,43 @@ function G.try_lock(sp, delta)
   if not st8.lock_step or not sp then return false end
   local t = st8.track()
   local sq = t:seq()
-  local step = sq:get_step(st8.lock_step, st8.lock_lane)
-  if not step then return false end
+  local held = held_steps(st8, sq)
+  if #held == 0 then return false end
 
   if sp.k == "seq" then
     if not STEP_SEQ[sp.id] then return false end
-    local cur = step[sp.id] or sq:get(sp)
-    step[sp.id] = util.clamp(cur + delta, sp.min, sp.max)
-    mark_held(st8, sq)
+    for _, e in ipairs(held) do
+      local cur = e.step[sp.id] or sq:get(sp)
+      e.step[sp.id] = util.clamp(cur + delta, sp.min, sp.max)
+      e.h.locked = true
+    end
     return true
   end
 
   if not sp.ch then return false end
-  step.lock = step.lock or {}
-  local cur = step.lock[sp.ch] or t:get(sp)
-  step.lock[sp.ch] = util.clamp(cur + delta, sp.min, sp.max)
-  mark_held(st8, sq)
-  t:send_lock(sp.ch, step.lock[sp.ch])
+  -- Deliberately not sent at the engine here. The track's own value is
+  -- untouched, so the edit is only ever heard on the steps that carry it,
+  -- as they come round.
+  for _, e in ipairs(held) do
+    e.step.lock = e.step.lock or {}
+    local cur = e.step.lock[sp.ch] or t:get(sp)
+    e.step.lock[sp.ch] = util.clamp(cur + delta, sp.min, sp.max)
+    e.h.locked = true
+  end
   return true
 end
 
--- E1 sets the held step's velocity, since track select is not needed then
+-- E1 sets the held steps' velocity, since track select is not needed then
 function G.try_velocity(delta)
   local st8 = G.state
   if not st8.lock_step then return false end
   local sq = st8.track():seq()
-  local step = sq:get_step(st8.lock_step, st8.lock_lane)
-  if not step then return false end
-  step.vel = util.clamp((step.vel or 100) + (delta * 4), 1, 127)
-  mark_held(st8, sq)
+  local held = held_steps(st8, sq)
+  if #held == 0 then return false end
+  for _, e in ipairs(held) do
+    e.step.vel = util.clamp((e.step.vel or 100) + (delta * 4), 1, 127)
+    e.h.locked = true
+  end
   return true
 end
 

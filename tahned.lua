@@ -4,14 +4,15 @@
 --
 -- E1 track   E2 cursor   E3 value
 -- K1 shift   K2 page back   K3 page forward   (pages do not wrap)
--- K2+K3 track select / transport
+-- K2+K3 master: track select, transport and the three sends
 --
 -- K1+E2 jump pages   K1+E3 coarse
--- hold a grid step and turn E3 to lock a parameter to that step
+-- hold grid steps and turn E3 to lock a parameter to all of them
 
 engine.name = "Tahned"
 
 local S     = include("tahned/lib/core/spec")
+local M     = include("tahned/lib/core/master")
 local state = include("tahned/lib/core/state")
 local P     = include("tahned/lib/ui/pages")
 local G     = include("tahned/lib/ui/grid_ui")
@@ -22,42 +23,12 @@ local screen_metro, grid_metro
 
 -- ------------------------------------------------------------------- params
 
-local FX = {
-  cho = { name = "chorus", p = {
-    { "rate",   "RATE",   controlspec.new(0.02, 8, "exp", 0, 0.4, "hz") },
-    { "depth",  "DEPTH",  controlspec.new(0, 1, "lin", 0, 0.5, "") },
-    { "spread", "SPREAD", controlspec.new(0, 1, "lin", 0, 0.7, "") },
-    { "fbk",    "FEEDBACK", controlspec.new(0, 0.85, "lin", 0, 0.2, "") },
-    { "tone",   "TONE",   controlspec.new(0, 1, "lin", 0, 0.6, "") },
-    { "level",  "LEVEL",  controlspec.new(0, 1, "lin", 0, 1, "") },
-  }},
-  dly = { name = "delay", p = {
-    { "time",  "TIME",     controlspec.new(0.01, 4, "exp", 0, 0.375, "s") },
-    { "fbk",   "FEEDBACK", controlspec.new(0, 0.98, "lin", 0, 0.45, "") },
-    { "hp",    "HIGHPASS", controlspec.new(0, 1, "lin", 0, 0.15, "") },
-    { "lp",    "LOWPASS",  controlspec.new(0, 1, "lin", 0, 0.75, "") },
-    { "ping",  "PING PONG", controlspec.new(0, 1, "lin", 0, 0, "") },
-    { "mod",   "MOD",      controlspec.new(0, 1, "lin", 0, 0.1, "") },
-    { "level", "LEVEL",    controlspec.new(0, 1, "lin", 0, 1, "") },
-  }},
-  rev = { name = "reverb", p = {
-    { "size",     "SIZE",     controlspec.new(0, 0.97, "lin", 0, 0.7, "") },
-    { "damp",     "DAMP",     controlspec.new(0, 1, "lin", 0, 0.4, "") },
-    { "shim",     "SHIMMER",  controlspec.new(0, 1, "lin", 0, 0.3, "") },
-    { "interval", "SHIM INT", controlspec.new(-12, 24, "lin", 1, 12, "st") },
-    { "shimfb",   "SHIM FBK", controlspec.new(0, 1, "lin", 0, 0.5, "") },
-    { "pre",      "PREDELAY", controlspec.new(0, 0.45, "lin", 0, 0.02, "s") },
-    { "lowcut",   "LOW CUT",  controlspec.new(0, 1, "lin", 0, 0.1, "") },
-    { "level",    "LEVEL",    controlspec.new(0, 1, "lin", 0, 1, "") },
-  }},
-}
-
 local function build_params()
   params:add_separator("tahned", "TAHNED")
 
-  for _, key in ipairs({ "cho", "dly", "rev" }) do
-    local fx = FX[key]
-    params:add_group("fx_" .. key, fx.name:upper(), #fx.p)
+  for _, key in ipairs(M.order) do
+    local fx = M.fx[key]
+    params:add_group("fx_" .. key, fx.name, #fx.p)
     for _, e in ipairs(fx.p) do
       local id = key .. "_" .. e[1]
       params:add_control(id, e[2], e[3])
@@ -90,8 +61,13 @@ end
 
 -- ---------------------------------------------------------------- persistence
 
+-- Bumped when the channel map moves under a machine, since a slot's values
+-- and a step's locks are both keyed by channel and would land on the wrong
+-- parameter otherwise.
+local DATA_VERSION = 2
+
 function state.serialize()
-  local out = { v = 1, sel = state.sel, tracks = {} }
+  local out = { v = DATA_VERSION, sel = state.sel, tracks = {} }
   for i, t in ipairs(state.tracks) do
     local e = { machine = t.machine, mute = t.mute, v = t.v, page = t.page, slot = {} }
     for m = 1, 3 do
@@ -115,6 +91,11 @@ end
 
 function state.deserialize(d)
   if not d or not d.tracks then return end
+  if (d.v or 1) ~= DATA_VERSION then
+    print("tahned: pattern data is version " .. tostring(d.v)
+      .. ", this build reads " .. DATA_VERSION .. " -- not loaded")
+    return
+  end
   state.stop()
   for i, e in ipairs(d.tracks) do
     local t = state.tracks[i]
@@ -238,8 +219,14 @@ function enc(n, d)
     return
   end
 
+  -- select mode is the master page: E2 walks the sends, K1+E2 jumps group,
+  -- E3 turns whatever is under the cursor
   if state.mode == "select" then
-    if n == 3 then params:delta("clock_tempo", d) end
+    if n == 2 then
+      if state.shift then state.master_group_move(d) else state.master_move(d) end
+    else
+      state.master_edit(state.shift and (d * 10) or d)
+    end
     state.dirty = true
     return
   end

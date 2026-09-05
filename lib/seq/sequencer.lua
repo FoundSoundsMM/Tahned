@@ -154,10 +154,31 @@ function Seq:advance(r, len)
   return r.pos
 end
 
--- rotation is applied when reading, so it stays non-destructive
+-- Rotation is applied when reading, so it stays non-destructive: the stored
+-- pattern is never rewritten and turning ROTATE back puts everything where
+-- it was. The grid and the screen look through the same mapping, so a
+-- rotated pattern is drawn where it actually plays.
 function Seq:read_index(pos, len)
   local rot = self.s.rotate or 0
   return ((pos - 1 + rot) % len) + 1
+end
+
+-- length of the run a display position walks: the lane's on amb, the
+-- sequencer's otherwise
+function Seq:disp_len(lane)
+  if self.kind == "amb" then
+    return util.clamp(self.lane[lane or 1].length, 1, 16)
+  end
+  return self:length()
+end
+
+-- grid/screen position -> stored step index
+function Seq:disp(i, lane)
+  return self:read_index(i, self:disp_len(lane))
+end
+
+function Seq:disp_step(i, lane)
+  return self:store(lane or 1)[self:disp(i, lane)]
 end
 
 function Seq:chance(st)
@@ -413,10 +434,12 @@ function Seq:all_off()
   end
 end
 
--- what the grid should light: playhead position for this slot
+-- What the grid should light. `last` is the stored step that sounded; the
+-- playhead belongs at the *display* position it sounded from, so that under
+-- rotation the pattern slides and the playhead keeps walking left to right.
 function Seq:playhead(lane)
-  if self.kind == "amb" then return self.lane[lane or 1].last end
-  return self.last
+  if self.kind == "amb" then return self.lane[lane or 1].pos end
+  return self.pos
 end
 
 return Seq

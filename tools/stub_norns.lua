@@ -57,9 +57,21 @@ return function(ROOT, screen_impl)
   metro = { init = function(f) return { start = function() end, stop = function() end, f = f } end }
   controlspec = { new = function(a, b, c, d, e) return { minval = a, maxval = b, default = e or a } end }
 
-  local actions = {}
+  local actions, val, spec = {}, { clock_tempo = 120 }, {}
   params = setmetatable({
+    add_control = function(_, id, _, sp)
+      spec[id] = sp
+      val[id] = sp and sp.default or 0
+    end,
     set_action = function(_, id, f) actions[id] = f end,
+    get = function(_, id) return val[id] end,
+    set = function(_, id, v) val[id] = v end,
+    string = function(_, id) return string.format("%.2f", val[id] or 0) end,
+    delta = function(_, id, d)
+      local sp = spec[id]
+      local lo, hi = sp and sp.minval or 20, sp and sp.maxval or 300
+      val[id] = math.min(math.max((val[id] or lo) + (d * (hi - lo) / 100), lo), hi)
+    end,
     bang = function() for _, f in pairs(actions) do f(0.5) end end,
   }, { __index = function() return function() end end })
 

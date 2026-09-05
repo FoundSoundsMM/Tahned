@@ -13,8 +13,8 @@ be locked to a single step.
 
 | | |
 |---|---|
-| **PERC** | Three-operator FM percussion. Pitch sweep, wavefolding on the body, separate noise and transient sections. Each modulator has its own decay envelope with an end level and its own modulation amount. One-shot voices. |
-| **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two function-generator envelopes with curve shaping on attack and release, either of which can cycle. Sixteen voices a track, oldest-first stealing. |
+| **PERC** | Three-operator FM percussion. Pitch sweep, wavefolding on the body, a noise section and a transient. Each modulator keeps its own ratio and its own amount; they share one decay and one end level. One-shot voices. **Defaults are an 808 kick.** |
+| **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two ADSR envelopes, either of which can cycle. Every parameter is read live, so a note already sounding follows what you turn. Sixteen voices a track, oldest-first stealing. |
 | **AMB** | A drone rather than a note player: six detuned FM partials that keep sounding, with eight trigger lanes the sequencer uses to cut rhythm and movement into the texture. |
 
 Switching machine is non-destructive — each track keeps a slot per machine, so
@@ -29,8 +29,44 @@ Every track has, in order:
    depending on the machine (TONE also gets a **HARMONY** page)
 3. **the machine's own pages** — three for PERC and AMB, four for TONE
 4. **FILTER** — type (LP / BP / HP / comb), cutoff, res, envelope, keytrack, drive
-5. **COLOUR** — bit reduction, rate reduction, tape wow, saturation, compression
+5. **COLOUR** — crush, tape wow, saturation, compression
 6. **LFO 1–4** — speed, multiplier, wave, mode, and **two destinations each**
+
+Labels are capped at six characters, which is what fits in a 32px cell
+without running into the section beside it. `tools/check-lua.lua` fails if a
+longer one is ever added.
+
+### Macros
+
+A control that only ever moved with another one is not two controls. PERC
+went from thirty-two parameters over four pages to twenty-four over three,
+and COLOUR from eight to five, by pooling the pairs that were never set
+apart:
+
+| | |
+|---|---|
+| **M.DEC** / **M.END** | one decay and one end level for both of PERC's modulator envelopes, B kept tighter and lower than A |
+| **N.DEC** | the noise envelope: its hold grows with its decay |
+| **N.TONE** | the noise's character on one bipolar control — dark, coarse and grainy to the left, fine bright hiss to the right |
+| **PHASE** | a locked start phase also locks the noise, so a hit set that way is identical every time |
+| **BLIP** (AMB) | level and FM index together: a louder blip is a brighter one |
+| **DEPTH** (AMB) | motion depth carries the amplitude wobble with it |
+| **CRUSH** | bit depth and sample rate walked down together |
+| **COMP** | ratio, attack and wet mix on one control |
+
+There are no curve controls. Attacks are convex and decays and releases are
+exponential, which is where the curve controls were always being left. The
+slots they freed on TONE went to a real decay stage, so both of its
+envelopes are ADSR rather than attack-sustain-release.
+
+### Held notes
+
+Every TONE parameter is read live off the control bus, so turning a ratio, an
+algorithm or a waveform while a note is held is heard on that note. The
+trade-off is at the other end: a parameter lock is heard for as long as its
+step is current, rather than being captured for the whole of a note that
+outlives the step. PERC is one-shot and latches everything at the trigger, so
+its locks are exact.
 
 Filter type picks between four separately compiled synthdefs rather than
 switching at runtime, so the three filters you are not using cost nothing.
@@ -44,21 +80,38 @@ switching at runtime, so the three filters you are not using cost nothing.
 | E3 | edit the value under the cursor |
 | K1 | shift |
 | K2 / K3 | page back / forward — **pages do not wrap** |
-| K2 + K3 | track select and transport |
+| K2 + K3 | master |
 | K1 + E2 | jump pages |
 | K1 + E3 | coarse |
 
-In track select: grid columns 1–8 pick the track, 10–12 set its machine, 14
-mutes it, and column 16 rows 1–2 are play/stop and reset. K3 also toggles play.
+### Master
+
+K2+K3 is the master page: the eight tracks with their patterns, transport,
+and the three sends. E1 picks a track, E2 walks the master parameters, K1+E2
+jumps between **CLOCK**, **CHORUS**, **DELAY** and **REVERB**, and E3 turns
+whatever is under the cursor. The clock comes first, so E3 still lands on the
+tempo the moment you get there. These are the same norns params that live in
+the menu and save with the PSET — reaching for the menu to set a delay time
+in the middle of a take is not a thing anybody wants to do.
+
+On the grid, columns 1–8 pick the track, 10–12 set its machine, 14 mutes it,
+and column 16 rows 1–2 are play/stop and reset. K3 also toggles play.
 Selecting a track returns you to the page you last had open on it.
 
 ### Parameter locks
 
-Hold a grid step and turn **E3** to lock the parameter under the cursor to that
-step alone. A locked value is flagged on screen and reverts when the step
-passes. Sequencer settings that mean something on a single step — probability,
-ratchet, gate, density — lock the same way. While a step is held, **E1** sets
-that step's velocity.
+Hold a grid step and turn **E3** to lock the parameter under the cursor to
+that step. **Hold several and the lock lands on all of them**, so a handful
+of steps can be shaped in one gesture. A locked value is flagged on screen,
+the header counts the pads down, and the lock reverts when the step passes.
+Sequencer settings that mean something on a single step — probability,
+ratchet, gate, density — lock the same way. While steps are held, **E1** sets
+their velocity, and on TONE the keyboard writes notes onto all of them.
+
+Writing a lock never pushes it at the engine. The track keeps its own value
+and the change is only heard on the steps that carry it, as they come round,
+so what you hear is always what the sequencer is playing rather than the
+whole instrument following your hand.
 
 A quick press toggles a step; a hold is a lock gesture and leaves it alone.
 

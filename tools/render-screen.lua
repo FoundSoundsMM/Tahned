@@ -95,8 +95,11 @@ init()
 
 local state = tahned.state
 
+local bodies = {}
+
 local function save(name, title)
   local body = table.concat(svg, "\n")
+  bodies[name] = body
   local f = assert(io.open(OUT .. "/" .. name .. ".svg", "w"))
   f:write(string.format(
     '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 128 64" '
@@ -138,33 +141,41 @@ do
     local st = sq:ensure(i)
     st.vel = 60 + (i * 4)
   end
-  sq.last = 5
+  sq.pos, sq.last = 5, 5
 end
 
 print("rendering " .. OUT)
-shot("01-perc-fm",    "PERC / FM",     1, 3, 3, function(t)
-  dial(t, 3, 2, 30); dial(t, 3, 3, 40); dial(t, 3, 8, 70)
-  dial(t, 3, 5, 2);  dial(t, 3, 6, 5)
+
+-- PERC  1 MASTER  2 SEQ  3 FM  4 MOD  5 BODY  6 FILTER  7 COLOUR  8.. LFO
+shot("01-perc-fm",    "PERC / FM",      1, 3, 2)
+shot("02-perc-mod",   "PERC / MOD",     1, 4, 2, function(t)
+  dial(t, 4, 2, 70); dial(t, 4, 4, 40)
 end)
-shot("02-perc-mod",   "PERC / MOD",    1, 4, 1)
-shot("03-perc-body",  "PERC / BODY",   1, 5, 3, function(t) dial(t, 5, 3, 40) end)
-shot("04-perc-noise", "PERC / NOISE",  1, 6, 7, function(t)
-  dial(t, 6, 7, 80); dial(t, 6, 8, 90); dial(t, 6, 4, 60)
+shot("03-perc-body",  "PERC / BODY",    1, 5, 3, function(t)
+  dial(t, 5, 6, 70); dial(t, 5, 8, -40)
 end)
-shot("05-perc-seq",   "PERC / SEQ",    1, 2, 2)
-shot("06-filter",     "FILTER",        1, 7, 2, function(t) dial(t, 7, 2, 70); dial(t, 7, 3, 60) end)
-shot("07-colour",     "COLOUR",        1, 8, 5, function(t)
-  dial(t, 8, 1, 70); dial(t, 8, 3, 50); dial(t, 8, 5, 60); dial(t, 8, 8, 80)
+shot("05-perc-seq",   "PERC / SEQ",     1, 2, 2)
+shot("06-filter",     "FILTER",         1, 6, 2, function(t)
+  dial(t, 6, 2, 70); dial(t, 6, 3, 60); dial(t, 6, 5, 30)
 end)
-shot("08-lfo",        "LFO 1",         1, 9, 5)
-shot("09-tone-algo",  "TONE / ALGO",   2, 4, 1)
-shot("10-tone-ampeg", "TONE / AMP EG", 2, 6, 2)
+shot("07-colour",     "COLOUR",         1, 7, 1, function(t)
+  dial(t, 7, 1, 70); dial(t, 7, 2, 50); dial(t, 7, 4, 60); dial(t, 7, 5, 80)
+end)
+shot("08-lfo",        "LFO 1",          1, 8, 5)
+
+-- TONE  1 MASTER 2 SEQ 3 HARMONY 4 ALGO 5 OPS 6 AMP EG 7 MOD EG 8 FILTER ...
+shot("09-tone-algo",  "TONE / ALGO",    2, 4, 1)
+shot("09b-tone-ops",  "TONE / OPS",     2, 5, 2)
+shot("10-tone-ampeg", "TONE / AMP EG",  2, 6, 2)
+shot("10b-tone-modeg","TONE / MOD EG",  2, 7, 4)
 shot("11-tone-harm",  "TONE / HARMONY", 2, 3, 4, function(t)
   local sq = t:seq()
   sq.s.chord = 11; sq.s.scale = 3; sq.s.invert = 1
 end)
+
+-- AMB  1 MASTER  2 SEQ  3 SPECTRUM  4 MOTION  5 LANES  6 FILTER ...
 shot("12-amb-spec",   "AMB / SPECTRUM", 3, 3, 2)
-shot("09b-tone-ops",  "TONE / OPS",    2, 5, 2)
+shot("12b-amb-motion","AMB / MOTION",   3, 4, 5)
 shot("13-amb-lanes",  "AMB / LANES",    3, 5, 1)
 
 -- every algorithm, to check the routing glyph against the engine's tables
@@ -173,25 +184,61 @@ for a = 0, 7 do
     function(t) state.set_page(4); t:set(state.track().pages[4].params[1], a) end)
 end
 
--- a parameter lock in progress
+-- a parameter lock in progress, over two held steps at once
 do
   state.select_track(1)
   state.tracks[1]:set_machine(1)
   state.set_page(3)
   state.cursor = 1
   tahned.grid.g.key(5, 1, 1)
+  tahned.grid.g.key(7, 1, 1)
   enc(3, -18)
   S.clear(); redraw()
-  save("14-lock", "PERC / FM  with step 5 held and TUNE locked")
+  save("14-lock", "PERC / FM  steps 5 and 7 held, TUNE locked on both")
+  shots[#shots + 1] = { name = "14-lock",
+    title = "PERC / FM  steps 5 and 7 held, TUNE locked on both" }
+  tahned.grid.g.key(7, 1, 0)
   tahned.grid.g.key(5, 1, 0)
 end
 
--- track select
+-- master: track select, transport and the sends
 state.mode = "select"
 state.tracks[2]:set_machine(2)
 state.tracks[3]:set_machine(3)
 state.tracks[4]:set_mute(true)
+state.mgroup, state.mcursor = 4, 3
 S.clear(); redraw()
-save("15-select", "K2+K3  track select and transport")
+save("15-select", "K2+K3  master: tracks, transport and the sends")
+shots[#shots + 1] = { name = "15-select",
+  title = "K2+K3  master: tracks, transport and the sends" }
+
+-- contact sheet, rebuilt from the same draws so it can never go stale
+do
+  local css = "body{background:#141414;color:#999;font:12px/1.5 system-ui,sans-serif;"
+    .. "margin:0;padding:24px}h1{color:#ddd;font-size:15px;margin:0 0 4px}"
+    .. "p.sub{margin:0 0 24px;color:#777}.wrap{display:grid;"
+    .. "grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:20px}"
+    .. "figure{margin:0}.scr{background:#000;border:1px solid #2c2c2c;"
+    .. "border-radius:3px;line-height:0}.scr svg{width:100%;height:auto;display:block}"
+    .. "figcaption{margin-top:6px;color:#8a8a8a}"
+  local out = { "<style>", css, "</style>",
+    "<h1>tahned &mdash; 128&times;64 display</h1>",
+    "<p class=sub>Drawn by the script's own code via tools/render-screen.lua. ",
+    "Text metrics approximated with a monospace face; everything else is exact.</p>",
+    "<div class=wrap>" }
+  for _, sh in ipairs(shots) do
+    out[#out + 1] = string.format(
+      '<figure><div class=scr><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64"'
+      .. ' shape-rendering="crispEdges"><title>%s</title>'
+      .. '<rect width="128" height="64" fill="black"/>%s</svg></div>'
+      .. '<figcaption>%s</figcaption></figure>',
+      sh.title, bodies[sh.name] or "", sh.title)
+  end
+  out[#out + 1] = "</div>"
+  local f = assert(io.open(OUT .. "/index.html", "w"))
+  f:write(table.concat(out, ""))
+  f:close()
+  print("  index.html   " .. #shots .. " screens")
+end
 
 print("done")

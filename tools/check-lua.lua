@@ -86,14 +86,25 @@ metro = { init = function(f, t) return { start = function() end, stop = function
 controlspec = { new = function(a, b, c, d, e, u)
   return { minval = a, maxval = b, default = e or a } end }
 
-local param_actions = {}
+-- params holds real values, so the master page has something to read and turn
+local param_actions, param_val, param_spec = {}, { clock_tempo = 120 }, {}
 params = {
   add_separator = function() end,
   add_group = function() end,
-  add_control = function() end,
+  add_control = function(_, id, _, spec)
+    param_spec[id] = spec
+    param_val[id] = spec and spec.default or 0
+  end,
   add_trigger = function() end,
   set_action = function(_, id, f) param_actions[id] = f end,
-  delta = function() end,
+  get = function(_, id) return param_val[id] end,
+  set = function(_, id, v) param_val[id] = v end,
+  string = function(_, id) return string.format("%.2f", param_val[id] or 0) end,
+  delta = function(_, id, d)
+    local sp = param_spec[id]
+    local lo, hi = sp and sp.minval or 20, sp and sp.maxval or 300
+    param_val[id] = math.min(math.max((param_val[id] or lo) + (d * (hi - lo) / 100), lo), hi)
+  end,
   bang = function() for _, f in pairs(param_actions) do f(0.5) end end,
 }
 setmetatable(params, { __index = function() return function() end end })
@@ -215,6 +226,111 @@ check("grid draws and takes presses for each machine", function()
     end
     G.redraw()
   end
+end)
+
+-- A cell is 32px wide with a 1px divider, so a label has 29px, and norns'
+-- font advances about 4px a character. Anything over seven runs into the
+-- next section; six is where it stays comfortable.
+check("no label is wide enough to run into the next cell", function()
+  local st = state
+  local seen, over = {}, {}
+  for m = 1, 3 do
+    st.tracks[1]:set_machine(m)
+    for _, page in ipairs(st.tracks[1].pages) do
+      for _, sp in ipairs(page.params) do
+        if not seen[sp.name] then
+          seen[sp.name] = true
+          if #sp.name > 6 then table.insert(over, sp.name .. " (" .. #sp.name .. ")") end
+        end
+      end
+    end
+  end
+  assert(#over == 0, "labels too wide: " .. table.concat(over, ", "))
+end)
+
+check("holding several steps locks all of them, silently", function()
+  local st = state
+  st.mode = "page"
+  st.select_track(1)
+  st.tracks[1]:set_machine(1)
+  local sq = st.seq()
+  sq:clear()
+  st.set_page(3)                            -- PERC / FM
+  st.cursor = 1                             -- TUNE
+  local sp = st.cur_spec()
+  local before = engine_calls.pset or 0
+  local track_before = st.tracks[1]:get(sp)
+
+  G.g.key(1, 1, 1); G.g.key(3, 1, 1); G.g.key(5, 1, 1)
+  assert(st.lock_count() == 3, "three pads held, saw " .. st.lock_count())
+  enc(3, 5)
+  for _, i in ipairs({ 1, 3, 5 }) do
+    local step = sq:get_step(i)
+    assert(step and step.lock and step.lock[sp.ch], "step " .. i .. " took no lock")
+  end
+  -- nothing is pushed at the engine and the track keeps its own value, so
+  -- the edit is only ever heard on the steps that carry it
+  assert((engine_calls.pset or 0) == before, "a lock was sent at the engine live")
+  assert(st.tracks[1]:get(sp) == track_before, "a lock moved the track's own value")
+
+  -- E1 is the held steps' velocity, and it reaches all of them too
+  enc(1, 3)
+  for _, i in ipairs({ 1, 3, 5 }) do
+    assert(sq:get_step(i).vel ~= 100, "step " .. i .. " kept its velocity")
+  end
+
+  -- letting one go leaves the others holding
+  G.g.key(5, 1, 0)
+  assert(st.lock_count() == 2 and st.lock_step ~= nil, "focus lost with pads still down")
+  G.g.key(3, 1, 0); G.g.key(1, 1, 0)
+  assert(st.lock_step == nil, "lock target not released")
+  sq:clear()
+end)
+
+check("rotating slides the pattern the grid and screen draw", function()
+  local st = state
+  st.select_track(1)
+  st.tracks[1]:set_machine(1)
+  local sq = st.seq()
+  sq:clear()
+  sq.s.length, sq.s.rotate = 16, 0
+  sq:ensure(1)
+  assert(sq:disp_step(1) ~= nil, "step 1 not drawn where it was written")
+  sq.s.rotate = 3
+  assert(sq:disp_step(1) == nil, "rotate did not move the pattern")
+  local found
+  for i = 1, 16 do if sq:disp_step(i) then found = i end end
+  assert(found == 14, "step 1 drew at " .. tostring(found) .. ", expected 14")
+  -- and a pad now edits the step it is drawing
+  G.g.key(14, 1, 1); G.g.key(14, 1, 0)
+  assert(sq.steps[1] == nil, "the pad under the rotated step did not edit it")
+  sq.s.rotate = 0
+  sq:clear()
+end)
+
+check("the master page walks and turns the sends", function()
+  local st = state
+  st.mode = "select"
+  st.mgroup, st.mcursor = 1, 1
+  assert(st.master_param().id == "clock_tempo", "clock is not first")
+  local t0 = params:get("clock_tempo")
+  enc(3, 4)
+  assert(params:get("clock_tempo") ~= t0, "E3 did not move the tempo")
+
+  -- K1+E2 jumps group, E2 walks inside it, E3 turns what is under the cursor
+  st.shift = true
+  enc(2, 3)
+  st.shift = false
+  assert(st.master_group().name == "REVERB", "K1+E2 landed on " .. st.master_group().name)
+  enc(2, 2)
+  local sp = st.master_param()
+  assert(sp and sp.id:match("^rev_"), "E2 left the group")
+  local v0 = params:get(sp.id)
+  enc(3, 6)
+  assert(params:get(sp.id) ~= v0, "E3 did not turn " .. sp.id)
+  redraw()
+  st.mgroup, st.mcursor = 1, 1
+  st.mode = "page"
 end)
 
 check("holding a step and turning E3 writes a parameter lock", function()

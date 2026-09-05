@@ -45,10 +45,13 @@ function S.c(ch, name, o)
   return s
 end
 
--- bipolar continuous, -64..63
+-- Bipolar continuous. The range is symmetric on purpose: with -64..63 the
+-- centre normalises to 64/127, so a control sitting at 0 still reaches the
+-- engine as 0.0079 rather than nothing. That is inaudible on most of them
+-- and a six second beat on DETUNE, which is worse than either.
 function S.b(ch, name, o)
   o = o or {}
-  o.min, o.max, o.def = o.min or -64, o.max or 63, o.def or 0
+  o.min, o.max, o.def = o.min or -63, o.max or 63, o.def or 0
   o.g = o.g or "bi"
   return S.c(ch, name, o)
 end
@@ -77,7 +80,7 @@ end
 
 function S.depth(ch, name)
   local s = base(ch, name, { g = "bi" })
-  s.k, s.min, s.max, s.def = "depth", -64, 63, 0
+  s.k, s.min, s.max, s.def = "depth", -63, 63, 0
   return s
 end
 

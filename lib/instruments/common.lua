@@ -50,7 +50,7 @@ C.ALGO3 = {
 }
 
 C.master = { name = "MASTER", params = {
-  { k = "mach", name = "MACHINE", g = "mach", opts = S.MACHINE, min = 0, max = 2, def = 0 },
+  { k = "mach", name = "MACH", g = "mach", opts = S.MACHINE, min = 0, max = 2, def = 0 },
   S.c(0, "LEVEL",  { def = 100 }),
   S.b(1, "PAN",    { def = 0, g = "pan" }),
   S.c(2, "DRIVE",  { def = 0 }),
@@ -66,21 +66,21 @@ C.filter = { name = "FILTER", params = {
   S.c(41, "CUTOFF", { def = 127, g = "filt" }),
   S.c(42, "RES",    { def = 0 }),
   S.b(43, "ENV",    { def = 0, g = "sweep" }),
-  S.c(44, "ATTACK", { def = 0,  g = "time" }),
-  S.c(45, "DECAY",  { def = 60, g = "env" }),
-  S.c(46, "KEYTRK", { def = 0 }),
+  S.c(44, "ATK",    { def = 0,  g = "atk" }),
+  S.c(45, "DEC",    { def = 60, g = "rel" }),
+  S.c(46, "KTRK",   { def = 0 }),
   S.c(47, "DRIVE",  { def = 0 }),
 }}
 
+-- Five macros rather than eight knobs. CRUSH walks bit depth and sample rate
+-- down together, which is the only way either of them was ever turned, and
+-- COMP carries ratio, attack and wet mix on one control.
 C.colour = { name = "COLOUR", params = {
-  S.c(48, "BITS",   { def = 0, g = "bits" }),
-  S.c(49, "RATE",   { def = 0, g = "bits" }),
-  S.c(50, "WOW",    { def = 0, g = "wow" }),
-  S.c(51, "WOW RT", { def = 40, g = "lfo" }),
-  S.c(52, "TAPE",   { def = 0, g = "sat" }),
-  S.c(53, "COMP",   { def = 40, g = "comp" }),
-  S.c(54, "C.ATK",  { def = 30, g = "time" }),
-  S.c(55, "C.MIX",  { def = 0 }),
+  S.c(48, "CRUSH",  { def = 0, g = "bits" }),
+  S.c(49, "WOW",    { def = 0, g = "wow" }),
+  S.c(50, "W.RATE", { def = 40, g = "lfo" }),
+  S.c(51, "TAPE",   { def = 0, g = "sat" }),
+  S.c(52, "COMP",   { def = 0, g = "comp" }),
 }}
 
 -- four LFOs, two destinations each
@@ -120,7 +120,7 @@ C.seqpage = {}
 
 C.seqpage.perc = { { name = "SEQ", params = (function()
   local p = shared_seq(128, 16)
-  p[7] = S.seq("ratchet", "RATCHET", { min = 1, max = 8, def = 1, g = "ratchet" })
+  p[7] = S.seq("ratchet", "RATCH", { min = 1, max = 8, def = 1, g = "ratchet" })
   p[8] = S.seq("gate",    "GATE",    { min = 1, max = 100, def = 50, g = "bar" })
   return p
 end)() } }
@@ -135,7 +135,7 @@ C.seqpage.tone = {
   end)() },
   { name = "HARMONY", params = {
     S.seq("root",   "ROOT",   { opts = C.NOTE_NAMES, def = 0 }),
-    S.seq("octave", "OCTAVE", { min = 1, max = 7, def = 3 }),
+    S.seq("octave", "OCT", { min = 1, max = 7, def = 3 }),
     S.seq("scale",  "SCALE",  { min = 1, max = 40, def = 1, g = "scale" }),
     S.seq("chord",  "CHORD",  { opts = C.CHORDS, def = 0, g = "chord" }),
     S.seq("invert", "INVERT", { min = -3, max = 3, def = 0, g = "bi" }),
@@ -149,7 +149,7 @@ C.seqpage.amb = { { name = "SEQ", params = (function()
   -- length and speed here are per lane; see Seq's lane_scoped
   local p = shared_seq(16, 16)
   p[7] = S.seq("lane",    "LANE",    { min = 1, max = 8, def = 1, g = "lane" })
-  p[8] = S.seq("density", "DENSITY", { min = 0, max = 100, def = 100, g = "bar" })
+  p[8] = S.seq("density", "DENS", { min = 0, max = 100, def = 100, g = "bar" })
   return p
 end)() } }
 

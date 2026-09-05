@@ -6,9 +6,9 @@
 // locks uniform: a lock is just (channel, value).
 //
 //   ch  0..7   master   level pan drive sendCho sendDly sendRev width -
-//   ch  8..39  syn1..4  instrument specific
+//   ch  8..39  syn      instrument specific; see each synthdef for its map
 //   ch 40..47  filter   type cutoff res envAmt envAtk envDec keytrk drive
-//   ch 48..55  colour   srrBits srrRate wowDepth wowRate tapeSat compAmt compAtk compMix
+//   ch 48..52  colour   crush wowDepth wowRate tapeSat comp
 //   ch 56..87  lfo1..4  spd mult wave mode destA depA destB depB   (8 each)
 //   ch 88..95  spare    88 is the LFO null destination
 //
@@ -201,49 +201,59 @@ Engine_Tahned : CroneEngine {
 		fTypes.do { |ft|
 
 			// ============================================================ PERC
-			// Three operator FM percussion, laid out the way the machine this
-			// borrows from does it: each modulator carries its own decay
-			// envelope with an end level and its own modulation amount, which
-			// is what gives FM drums their snap.
+			// Three operator FM percussion. The two modulators keep their own
+			// ratio and their own amount -- that is what an FM drum is made of --
+			// but share one decay and one end level, because they were never
+			// usefully set apart. Curves are fixed exponentials.
+			//
+			//  8 tune   9 sweep  10 s.time 11 algo  12 wave  13 m.wave 14 fdbk 15 fold
+			// 16 ratA  17 modA   18 ratB   19 modB  20 m.dec 21 m.end  22 phase 23 level
+			// 24 atk   25 hold   26 dec    27 click 28 c.lev 29 noise  30 n.dec 31 n.tone
 			SynthDef(("tahned_perc_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0,
 				vel = 1, note = 36, nzbuf = 0|
 				var p = Latch.kr(In.kr(bus, nCh) + In.kr(mbus, nCh), Impulse.kr(0));
 				// syn1  fm
 				var tune  = p[8].linlin(0, 1, -24, 24);
-				var stim  = p[9].linexp(0, 1, 0.002, 1.2);
-				var sdep  = (p[10] * 2) - 1;
+				var sdep  = (p[9] * 2) - 1;
+				var stim  = p[10].linexp(0, 1, 0.003, 2);
 				var algo  = p[11].round.clip(0, 7);
 				var waveC = p[12].round.clip(0, 7);
 				var waveM = p[13].round.clip(0, 7);
 				var fdbk  = p[14];
 				var fold  = p[15];
-				// syn2  one modulation envelope per operator
+				// syn2  modulators. M.DEC and M.END drive both envelopes, B kept
+				// tighter and lower so the pair still reads as two operators.
 				var ratA = Select.kr(p[16].round.clip(0, 15), rat);
-				var decA = p[17].linexp(0, 1, 0.002, 4);
-				var endA = p[18];
-				var modA = p[19];
-				var ratB = Select.kr(p[20].round.clip(0, 15), rat);
-				var decB = p[21].linexp(0, 1, 0.002, 4);
-				var endB = p[22];
-				var modB = p[23];
-				// syn3  body
-				var bhld = p[24].linexp(0, 1, 0.0005, 2);
-				var bdec = p[25].linexp(0, 1, 0.005, 8);
-				var phC  = p[26];
-				var blev = p[27];
-				var nrst = p[28].round.clip(0, 1);
-				var nrm  = p[29].round.clip(0, 1);
-				var batk = p[30].linexp(0, 1, 0.0002, 0.3);
-				var bcrv = p[31].linlin(0, 1, 0, -12);
-				// syn4  noise and transient
-				var nhld  = p[32].linexp(0, 1, 0.0005, 1);
-				var ndec  = p[33].linexp(0, 1, 0.003, 6);
-				var tran  = p[34].round.clip(0, 3);
-				var tlev  = p[35];
-				var nbase = p[36].linexp(0, 1, 40, 8000);
-				var nwdth = p[37];
-				var ngran = p[38];
-				var nlev  = p[39];
+				var modA = p[17];
+				var ratB = Select.kr(p[18].round.clip(0, 15), rat);
+				var modB = p[19];
+				var mdec = p[20].linexp(0, 1, 0.002, 4);
+				var mend = p[21];
+				var phC  = p[22];
+				var blev = p[23];
+				var decA = mdec;
+				var decB = mdec * 0.55;
+				var endA = mend;
+				var endB = mend * 0.7;
+				// syn3  body and noise
+				var batk = p[24].linexp(0, 1, 0.0002, 0.3);
+				var bhld = p[25].linexp(0, 1, 0.0005, 2);
+				var bdec = p[26].linexp(0, 1, 0.005, 8);
+				var tran = p[27].round.clip(0, 3);
+				var tlev = p[28];
+				var nlev = p[29];
+				// one control for the noise envelope: the hold grows with the decay
+				var ndec = p[30].linexp(0, 1, 0.003, 6);
+				var nhld = p[30].linexp(0, 1, 0.0005, 0.35);
+				// and one for its character: dark, coarse and grainy on the left,
+				// bright, fine hiss on the right
+				var ntone = (p[31] * 2) - 1;
+				var nbase = ntone.linexp(-1, 1, 60, 9000);
+				var nwdth = 0.4 + (ntone.abs * 0.6);
+				var ngran = ntone.neg.clip(0, 1);
+				// a locked start phase also locks the noise, so a hit set that way
+				// comes out the same every time
+				var nrst  = phC < 0.99;
 				// filter
 				var cut   = p[41].linexp(0, 1, 30, 16000);
 				var res   = p[42];
@@ -258,6 +268,8 @@ Engine_Tahned : CroneEngine {
 				var oC = a3[3], oA = a3[4], oB = a3[5];
 
 				var base = (note + tune).midicps;
+				// SWEEP is the depth and it is what you reach for first, so it is
+				// the first cell on the page and it is not zero by default.
 				var sweep = EnvGen.ar(Env([1, 0], [stim], [-4]));
 				var f = base * (2 ** (sweep * sdep * 4));
 
@@ -279,10 +291,10 @@ Engine_Tahned : CroneEngine {
 
 				// wavefold applies to the body only; noise and transient stay clean
 				sig = Fold.ar(sig * (1 + (fold * 8)), -1, 1) * (1 / (1 + (fold * 2.5)));
-				body = EnvGen.ar(Env([0, 1, 1, 0], [batk, bhld, bdec], [2, 0, bcrv]));
+				body = EnvGen.ar(Env([0, 1, 1, 0], [batk, bhld, bdec], [2, 0, -4]));
 				sig = sig * body * blev;
 
-				// noise reset plays a fixed buffer so a hit can be repeatable
+				// a locked phase plays fixed noise, so the hit is repeatable
 				nz = Select.ar(nrst, [
 					WhiteNoise.ar,
 					PlayBuf.ar(1, nzbuf, 1, 1, 0, loop: 1)
@@ -290,7 +302,6 @@ Engine_Tahned : CroneEngine {
 				// grain: latching the noise thins white down to something coarse
 				nz = Latch.ar(nz, Impulse.ar(ngran.linexp(0, 1, 20000, 200)));
 				nz = LPF.ar(HPF.ar(nz, nbase), (nbase * (1 + (nwdth * 30))).clip(40, 18000));
-				nz = nz * Select.ar(nrm, [DC.ar(1), opC]);
 				nzEnv = EnvGen.ar(Env([0, 1, 1, 0], [0.0005, nhld, ndec], [0, 0, -4]));
 				nz = nz * nzEnv * nlev;
 
@@ -309,60 +320,71 @@ Engine_Tahned : CroneEngine {
 					res) / (1 + (fDrv * 2));
 
 				sig = sig * vel.pow(1.4) * 0.7;
+				// the voice has to outlive whichever section runs longest, the
+				// pitch sweep included now that it reaches two seconds
 				sig = sig * EnvGen.ar(Env([1, 1, 0],
-					[bhld + nhld + bdec.max(ndec).max(fDec) * 1.4 + 0.12, 0.02]),
+					[(bhld + nhld + bdec.max(ndec).max(fDec).max(stim)) * 1.4 + 0.12, 0.02]),
 					doneAction: 2);
 				Out.ar(out, Pan2.ar(sig, 0));
 			}).add;
 
 			// ============================================================ TONE
-			// 4 operator FM, OPL3 waveform set, ASR function generators.
+			// 4 operator FM, OPL3 waveform set, ADSR on both envelopes.
+			//
+			// Everything is read live off the bus rather than latched at note on,
+			// so a parameter turned while a note is held is heard on that note.
+			// The lag is what keeps a swept ratio or a switched algorithm from
+			// clicking; it is also why a p-lock is heard for as long as its step
+			// is current rather than for the whole of a note that outlives it.
+			//
+			//  8 algo   9 rat1  10 rat2  11 rat3  12 rat4 13 fdbk 14 detune 15 fine
+			// 16 lvl1  17 lvl2  18 lvl3  19 lvl4  20 waveC 21 waveM 22 index 23 fold
+			// 24 aAtk  25 aDec  26 aSus  27 aRel  28 aLoop 29 vel  30 spread
+			// 31 mAtk  32 mDec  33 mSus  34 mRel  35 mLoop 36 mDest 37 mDepth
 			SynthDef(("tahned_tone_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0, gate = 1, hz = 220, vel = 1,
 				t_choke = 0|
-				var pm = In.kr(bus, nCh) + In.kr(mbus, nCh);
-				var pc = pm.lag(0.015);
-				var pl = Latch.kr(pm, Impulse.kr(0));
+				var p = (In.kr(bus, nCh) + In.kr(mbus, nCh)).lag(0.02);
 				// syn1
-				var algo  = pl[8].round.clip(0, 7);
-				var r1 = Select.kr(pl[9].round.clip(0, 12), mul);
-				var r2 = Select.kr(pl[10].round.clip(0, 12), mul);
-				var r3 = Select.kr(pl[11].round.clip(0, 12), mul);
-				var r4 = Select.kr(pl[12].round.clip(0, 12), mul);
-				var fbk   = pc[13];                     // shown as the chip's 0..7
-				var det   = ((pc[14] * 2) - 1) * 0.03;
-				var fine  = ((pl[15] * 2) - 1) * 0.5;
+				var algo  = p[8].round.clip(0, 7);
+				var r1 = Select.kr(p[9].round.clip(0, 12), mul);
+				var r2 = Select.kr(p[10].round.clip(0, 12), mul);
+				var r3 = Select.kr(p[11].round.clip(0, 12), mul);
+				var r4 = Select.kr(p[12].round.clip(0, 12), mul);
+				var fbk   = p[13];                     // shown as the chip's 0..7
+				var det   = ((p[14] * 2) - 1) * 0.03;
+				var fine  = ((p[15] * 2) - 1) * 0.5;
 				// syn2
-				var l1 = pc[16], l2 = pc[17], l3 = pc[18], l4 = pc[19];
-				var waveC = pl[20].round.clip(0, 7);
-				var waveM = pl[21].round.clip(0, 7);
-				var index = pc[22].linlin(0, 1, 0, 6);
-				var fold  = pc[23];
-				// syn3  amp function generator
-				var aAtk = pl[24].linexp(0, 1, 0.0008, 8);
-				var aAcv = pl[25].linlin(0, 1, 8, -8);
-				var aHold = pl[26];
-				var aRel = pl[27].linexp(0, 1, 0.004, 12);
-				var aRcv = pl[28].linlin(0, 1, 8, -8);
-				var aLoop = pl[29].round.clip(0, 1);
-				var velAmp = pc[30];
-				var spread = (pc[31] * 2) - 1;
-				// syn4  mod function generator
-				var mAtk = pl[32].linexp(0, 1, 0.0008, 8);
-				var mAcv = pl[33].linlin(0, 1, 8, -8);
-				var mHold = pl[34];
-				var mRel = pl[35].linexp(0, 1, 0.004, 12);
-				var mRcv = pl[36].linlin(0, 1, 8, -8);
-				var mDest = pl[37].round.clip(0, 5);
-				var mDep  = (pc[38] * 2) - 1;
-				var mLoop = pl[39].round.clip(0, 1);
+				var l1 = p[16], l2 = p[17], l3 = p[18], l4 = p[19];
+				var waveC = p[20].round.clip(0, 7);
+				var waveM = p[21].round.clip(0, 7);
+				var index = p[22].linlin(0, 1, 0, 6);
+				var fold  = p[23];
+				// syn3  amp ADSR. Curves are fixed: a convex attack and an
+				// exponential decay and release, which is where the curve
+				// controls were always being left.
+				var aAtk = p[24].linexp(0, 1, 0.0008, 8);
+				var aDec = p[25].linexp(0, 1, 0.004, 8);
+				var aSus = p[26];
+				var aRel = p[27].linexp(0, 1, 0.004, 12);
+				var aLoop = p[28].round.clip(0, 1);
+				var velAmp = p[29];
+				var spread = (p[30] * 2) - 1;
+				// syn4  mod ADSR
+				var mAtk = p[31].linexp(0, 1, 0.0008, 8);
+				var mDec = p[32].linexp(0, 1, 0.004, 8);
+				var mSus = p[33];
+				var mRel = p[34].linexp(0, 1, 0.004, 12);
+				var mLoop = p[35].round.clip(0, 1);
+				var mDest = p[36].round.clip(0, 5);
+				var mDep  = (p[37] * 2) - 1;
 				// filter
-				var cut   = pc[41].linexp(0, 1, 30, 16000);
-				var res   = pc[42];
-				var fEnvA = (pc[43] * 2) - 1;
-				var fAtk  = pl[44].linexp(0, 1, 0.0008, 4);
-				var fDec  = pl[45].linexp(0, 1, 0.005, 8);
-				var ktrk  = pc[46];
-				var fDrv  = pc[47];
+				var cut   = p[41].linexp(0, 1, 30, 16000);
+				var res   = p[42];
+				var fEnvA = (p[43] * 2) - 1;
+				var fAtk  = p[44].linexp(0, 1, 0.0008, 4);
+				var fDec  = p[45].linexp(0, 1, 0.005, 8);
+				var ktrk  = p[46];
+				var fDrv  = p[47];
 
 				var a4 = Engine_Tahned.algo4(algo);
 				var c43 = a4[0], c42 = a4[1], c32 = a4[2];
@@ -371,14 +393,16 @@ Engine_Tahned : CroneEngine {
 				// one-hot mask for the mod-EG destination
 				var msk = (0..5).collect { |i|
 					Select.kr(mDest, Array.fill(6, { |j| (i == j).binaryValue })) };
-				var aGt = (gate * (1 - aLoop)) + (aLoop * gate * Impulse.kr(1 / (aAtk + aRel + 0.002)));
-				var mGt = (gate * (1 - mLoop)) + (mLoop * gate * Impulse.kr(1 / (mAtk + mRel + 0.002)));
+				var aGt = (gate * (1 - aLoop))
+					+ (aLoop * gate * Impulse.kr(1 / (aAtk + aDec + aRel + 0.002)));
+				var mGt = (gate * (1 - mLoop))
+					+ (mLoop * gate * Impulse.kr(1 / (mAtk + mDec + mRel + 0.002)));
 
 				var ampEg = EnvGen.ar(
-					Env([0, 1, aHold, 0], [aAtk, 0.001, aRel], [aAcv, 0, aRcv], releaseNode: 2),
+					Env([0, 1, aSus, 0], [aAtk, aDec, aRel], [2, -4, -4], releaseNode: 2),
 					aGt, doneAction: 2 * (1 - aLoop));
 				var modEg = EnvGen.ar(
-					Env([0, 1, mHold, 0], [mAtk, 0.001, mRel], [mAcv, 0, mRcv], releaseNode: 2),
+					Env([0, 1, mSus, 0], [mAtk, mDec, mRel], [2, -4, -4], releaseNode: 2),
 					mGt);
 				var me = modEg * mDep;
 				var f = hz * (2 ** ((fine + (me * 12 * msk[1])) / 12));
@@ -386,6 +410,10 @@ Engine_Tahned : CroneEngine {
 				var fld = (fold + (me * msk[2])).clip(0, 1);
 				var fbA = (fbk + (me * msk[4])).clip(0, 1);
 				var l4m = (l4 + (me * msk[5])).clip(0, 1);
+				// SPREAD places the voice by its own pitch, so a chord opens out
+				// across the field instead of every note landing in one spot --
+				// which is what a pan offset would be, and MASTER PAN already is.
+				var place = (spread * ((hz.cpsmidi - 60) / 24)).clip(-1, 1);
 
 				var op4, op3, op2, op1, sig, fEnv, fbs;
 
@@ -413,11 +441,19 @@ Engine_Tahned : CroneEngine {
 				// stolen voices fade out here and free themselves, whatever the
 				// amp envelope's own release or loop setting is doing
 				sig = sig * EnvGen.ar(Env([1, 0], [0.015]), t_choke, doneAction: 2);
-				Out.ar(out, Pan2.ar(sig, spread));
+				Out.ar(out, Pan2.ar(sig, place));
 			}).add;
 			// ============================================================= AMB
 			// persistent FM drone.  six detuned partials, plus eight trigger
 			// lanes the sequencer uses to cut rhythm into the texture.
+			//
+			// It never stops, so its amplitude envelope is not worth controls:
+			// fixed times fade it in when the machine is chosen and out when it
+			// is not, and that is all they ever did.
+			//
+			//  8 root   9 harm  10 tilt  11 index 12 spread 13 voices 14 sub  15 fold
+			// 16 rate  17 depth 18 drift 19 chaos 20 glide  21 shim   22 shInt 23 width
+			// 24 bDec  25 bPit  26 blip  27 stut  28 gate   29 sweep  30 swell 31 shift
 			SynthDef(("tahned_amb_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0, gate = 1, note = 36,
 				v0 = 0, v1 = 0, v2 = 0, v3 = 0, v4 = 0, v5 = 0, v6 = 0, v7 = 0,
 				t_l0 = 0, t_l1 = 0, t_l2 = 0, t_l3 = 0, t_l4 = 0, t_l5 = 0, t_l6 = 0, t_l7 = 0|
@@ -429,35 +465,31 @@ Engine_Tahned : CroneEngine {
 				var tilt  = (p[10] * 2) - 1;
 				var index = p[11].linlin(0, 1, 0, 4);
 				var sprd  = p[12];
-				var drift = p[13];
-				var nVoi  = p[14].linlin(0, 1, 1, 6);
+				var nVoi  = p[13].linlin(0, 1, 1, 6);
+				var subL  = p[14];
 				var fold  = p[15];
-				// syn2 motion
+				// syn2 motion. DEPTH carries the amplitude wobble with it -- they
+				// were only ever turned together.
 				var mRate = p[16].linexp(0, 1, 0.008, 6);
 				var mDep  = p[17];
-				var chaos = p[18];
-				var shim  = p[19];
-				var shInt = Select.kr(p[20].round.clip(0, 3), [2, 3, 4, 6]);
-				var glide = p[21].linexp(0, 1, 0.002, 8);
-				var width = p[22];
-				var subL  = p[23];
-				// syn3 grain / lanes
+				var drift = p[18];
+				var chaos = p[19];
+				var glide = p[20].linexp(0, 1, 0.002, 8);
+				var shim  = p[21];
+				var shInt = Select.kr(p[22].round.clip(0, 3), [2, 3, 4, 6]);
+				var width = p[23];
+				// syn3 lanes.  BLIP is level and index at once: a louder blip is a
+				// brighter one, which is the only way it was ever wanted.
 				var bDec  = p[24].linexp(0, 1, 0.005, 1.5);
 				var bPit  = p[25].linlin(0, 1, 0, 36);
-				var bIdx  = p[26].linlin(0, 1, 0, 8);
-				var bLvl  = p[27];
-				var stutT = p[28].linexp(0, 1, 0.01, 0.4);
-				var gDep  = p[29];
-				var swAmt = (p[30] * 2) - 1;
-				var swlT  = p[31].linexp(0, 1, 0.02, 6);
-				// syn4 envelope
-				var eAtk = p[32].linexp(0, 1, 0.01, 20);
-				var eAcv = p[33].linlin(0, 1, 8, -8);
-				var eHold = p[34];
-				var eRel = p[35].linexp(0, 1, 0.05, 20);
-				var eRcv = p[36].linlin(0, 1, 8, -8);
-				var shRng = p[37].linlin(0, 1, 0, 24);
-				var aMod = p[38];
+				var bAmt  = p[26];
+				var bIdx  = bAmt * 8;
+				var bLvl  = bAmt.sqrt;
+				var stutT = p[27].linexp(0, 1, 0.01, 0.4);
+				var gDep  = p[28];
+				var swAmt = (p[29] * 2) - 1;
+				var swlT  = p[30].linexp(0, 1, 0.02, 6);
+				var shRng = p[31].linlin(0, 1, 0, 24);
 				// filter
 				var cut  = p[41].linexp(0, 1, 30, 16000);
 				var res  = p[42];
@@ -520,9 +552,10 @@ Engine_Tahned : CroneEngine {
 
 				sig = sig + blip;
 
-				env = EnvGen.ar(Env([0, 1, eHold.max(0.02), 0], [eAtk, 0.01, eRel],
-					[eAcv, 0, eRcv], releaseNode: 2), gate, doneAction: 2);
-				sig = sig * env * (1 - (aMod * 0.5 * (1 - LFNoise2.kr(mRate).range(0, 1))));
+				// fixed fade in and out; a drone has no note to shape
+				env = EnvGen.ar(Env([0, 1, 1, 0], [1.5, 0.01, 2.5], [2, 0, -4], releaseNode: 2),
+					gate, doneAction: 2);
+				sig = sig * env * (1 - (mDep * 0.35 * (1 - LFNoise2.kr(mRate).range(0, 1))));
 
 				Out.ar(out, Pan2.ar(sig, 0, 1 - (width * 0.3)) * 0.8
 					+ Pan2.ar(DelayC.ar(sig, 0.04, 0.017 * width), 0.9 * width, width * 0.3));
@@ -579,11 +612,15 @@ Engine_Tahned : CroneEngine {
 			var p = (In.kr(bus, nCh) + In.kr(mbus, nCh)).lag(0.02);
 			var lvl  = p[0], pan = (p[1] * 2) - 1, drv = p[2];
 			var sCho = p[3], sDly = p[4], sRev = p[5], width = p[6];
-			var bits = p[48].linlin(0, 1, 16, 2);
-			var srate = p[49].linexp(0, 1, 48000, 700);
-			var wowD = p[50], wowR = p[51].linexp(0, 1, 0.12, 8);
-			var sat  = p[52];
-			var cAmt = p[53], cAtk = p[54].linexp(0, 1, 0.0004, 0.12), cMix = p[55];
+			// CRUSH walks bit depth and sample rate down together and COMP
+			// carries ratio, attack and wet mix, because nothing was ever gained
+			// from setting either pair apart.
+			var crush = p[48];
+			var bits = crush.linlin(0, 1, 16, 3);
+			var srate = crush.linexp(0, 1, 48000, 1200);
+			var wowD = p[49], wowR = p[50].linexp(0, 1, 0.12, 8);
+			var sat  = p[51];
+			var cAmt = p[52], cAtk = p[52].linexp(0, 1, 0.08, 0.0006), cMix = p[52];
 			var sig = In.ar(in, 2);
 			var dry, q, wow, comp, m, sd;
 
@@ -594,7 +631,7 @@ Engine_Tahned : CroneEngine {
 			dry = sig;
 			sig = Latch.ar(sig, Impulse.ar(srate));
 			sig = (sig / q).round * q;
-			sig = SelectX.ar(((16 - bits) / 14).max((48000 - srate) / 47300).clip(0, 1),
+			sig = SelectX.ar(((16 - bits) / 13).max((48000 - srate) / 46800).clip(0, 1),
 				[dry, sig]);
 
 			// tape wow + flutter

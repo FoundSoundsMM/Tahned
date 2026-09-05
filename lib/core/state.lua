@@ -1,5 +1,6 @@
 -- state.lua -- tracks, selection, transport
 local Track = include("tahned/lib/core/track")
+local M     = include("tahned/lib/core/master")
 
 local state = {}
 
@@ -13,6 +14,9 @@ state.playing = false
 state.held    = {}        -- grid pads currently held, for step editing
 state.lock_step = nil     -- step being parameter-locked, if any
 state.lock_lane = 1
+state.lock_pad  = nil     -- where that step is drawn, which ROTATE can move
+state.mgroup  = 1         -- master fx group / parameter under E2 in select mode
+state.mcursor = 1
 state.dirty   = true
 
 function state.init()
@@ -55,6 +59,39 @@ end
 function state.select_track(i)
   state.sel = util.clamp(i, 1, 8)
   state.cursor = util.clamp(state.cursor, 1, 8)
+  state.dirty = true
+end
+
+-- how many pads are down; a lock gesture writes to all of them
+function state.lock_count()
+  local n = 0
+  for _ in pairs(state.held) do n = n + 1 end
+  return n
+end
+
+-- ------------------------------------------------------------- master fx
+
+function state.master_group() return M.group(state.mgroup) end
+
+function state.master_param()
+  return M.param(state.mgroup, state.mcursor)
+end
+
+function state.master_move(d)
+  local g = state.master_group()
+  state.mcursor = util.clamp(state.mcursor + d, 1, #g.p)
+  state.dirty = true
+end
+
+function state.master_group_move(d)
+  state.mgroup = util.clamp(state.mgroup + d, 1, #M.groups)
+  state.mcursor = 1
+  state.dirty = true
+end
+
+function state.master_edit(d)
+  local sp = state.master_param()
+  if sp then params:delta(sp.id, d) end
   state.dirty = true
 end
 

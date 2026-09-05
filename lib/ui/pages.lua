@@ -7,6 +7,7 @@
 local S = include("tahned/lib/core/spec")
 local W = include("tahned/lib/ui/widgets")
 local C = include("tahned/lib/instruments/common")
+local M = include("tahned/lib/core/master")
 local musicutil = require "musicutil"
 
 local P = {}
@@ -31,7 +32,7 @@ local function value_text(track, sp, v)
   end
   if sp.id == "scale" then
     local sc = musicutil.SCALES[util.clamp(v, 1, #musicutil.SCALES)]
-    return sc and sc.name:sub(1, 7) or "-"
+    return sc and sc.name:sub(1, 6) or "-"
   end
   if sp.id == "speed" then return C.SPEED_NAMES[v + 1] or "-" end
   return S.text(sp, v)
@@ -74,7 +75,7 @@ end
 
 -- ---------------------------------------------------------------- chrome
 
-local function draw_header(track, page, npages, lock_step, state_lock_vel)
+local function draw_header(track, page, npages, lock_pad, state_lock_vel, nheld)
   screen.level(15)
   screen.move(0, 6)
   screen.text("T" .. track.idx)
@@ -82,10 +83,16 @@ local function draw_header(track, page, npages, lock_step, state_lock_vel)
   screen.move(13, 6)
   screen.text(track:inst().short)
 
+  -- a lock gesture over several pads says so, since the edit lands on all
+  local label = track.pages[page].name
+  if lock_pad then
+    label = "LOCK " .. lock_pad
+    if (nheld or 1) > 1 then label = label .. "+" .. (nheld - 1) end
+  end
   screen.level(track.mute and 3 or 15)
   screen.move(30, 6)
-  screen.text(lock_step and ("LOCK " .. lock_step) or track.pages[page].name)
-  if lock_step then
+  screen.text(label)
+  if lock_pad then
     screen.level(6)
     screen.move(75, 6)
     screen.text("v" .. (state_lock_vel or 100))
@@ -114,9 +121,10 @@ local function draw_footer(track)
       local ln = sq.lane[l]
       local x0 = (l - 1) * 16
       for i = 1, ln.length do
-        local on = ln.steps[i] and ln.steps[i].on
-        screen.level(i == ln.last and 15 or (on and 6 or 1))
-        screen.rect(x0 + ((i - 1) * (16 / ln.length)), y, 1, i == ln.last and 3 or 2)
+        local st = sq:disp_step(i, l)
+        local on = st and st.on
+        screen.level(i == ln.pos and 15 or (on and 6 or 1))
+        screen.rect(x0 + ((i - 1) * (16 / ln.length)), y, 1, i == ln.pos and 3 or 2)
       end
     end
     screen.fill()
@@ -125,11 +133,12 @@ local function draw_footer(track)
 
   local len = sq:length()
   local w = 128 / len
+  local head = sq:playhead()
   for i = 1, len do
-    local st = sq.steps[i]
-    screen.level(i == sq.last and 15 or ((st and st.on) and 6 or 1))
+    local st = sq:disp_step(i)
+    screen.level(i == head and 15 or ((st and st.on) and 6 or 1))
     screen.rect((i - 1) * w, y, math.max(1, w - (len > 32 and 0 or 1)),
-      i == sq.last and 3 or 2)
+      i == head and 3 or 2)
   end
   screen.fill()
 end
@@ -139,7 +148,8 @@ end
 function P.draw_page(state)
   local track = state.track()
   local page = state.cur_page()
-  draw_header(track, state.page(), #track.pages, state.lock_step, state.lock_vel())
+  draw_header(track, state.page(), #track.pages, state.lock_pad, state.lock_vel(),
+    state.lock_count())
 
   screen.level(1)
   for c = 1, 3 do
@@ -157,25 +167,43 @@ function P.draw_page(state)
   draw_footer(track)
 end
 
--- track select and transport, on K2+K3
+-- Master: track select, transport, and the sends. E2 walks the master
+-- parameter, K1+E2 jumps between CLOCK / CHORUS / DELAY / REVERB, E3 turns
+-- whatever is under the cursor.
 function P.draw_select(state)
+  local g = state.master_group()
+  local sp = state.master_param()
+
   screen.level(15)
   screen.move(0, 6)
   screen.text(state.playing and "PLAY" or "STOP")
   screen.level(4)
-  screen.move(30, 6)
-  screen.text(string.format("%.0f BPM", clock.get_tempo()))
-  screen.level(4)
-  screen.move(127, 6)
-  screen.text_right("K3 PLAY")
+  screen.move(28, 6)
+  screen.text(g.name)
+  -- one tick per parameter in the group, so the cursor has somewhere to be
+  local x0 = 128 - (#g.p * 3)
+  for i = 1, #g.p do
+    screen.level(i == state.mcursor and 15 or 2)
+    screen.rect(x0 + ((i - 1) * 3), 2, 2, i == state.mcursor and 4 or 2)
+    screen.fill()
+  end
+
+  -- the parameter itself, on its own line
+  if sp then
+    screen.level(15)
+    screen.move(2, 13)
+    screen.text(sp.name)
+    screen.move(126, 13)
+    screen.text_right(M.text(sp.id))
+  end
 
   for i = 1, 8 do
     local t = state.tracks[i]
-    local y = 10 + ((i - 1) * 6.6)
+    local y = 15 + ((i - 1) * 5.9)
     local sel = (i == state.sel)
     if sel then
       screen.level(15)
-      screen.rect(0, y, 128, 6)
+      screen.rect(0, y, 128, 5.6)
       screen.fill()
     end
     screen.level(sel and 0 or (t.mute and 3 or 12))
@@ -184,21 +212,23 @@ function P.draw_select(state)
     screen.move(15, y + 5)
     screen.text(t:inst().name)
 
-    -- pattern at a glance
+    -- pattern at a glance, through the same rotation the grid draws
     local sq = t:seq()
     local len = (sq.kind == "amb") and 16 or sq:length()
-    local x0, w = 46, 78
-    for s = 1, math.min(len, 64) do
+    local shown = math.min(len, 64)
+    local x1, w = 46, 78
+    for s = 1, shown do
       local on
       if sq.kind == "amb" then
         on = false
-        for l = 1, 8 do if sq.lane[l].steps[s] then on = true break end end
+        for l = 1, 8 do if sq:disp_step(s, l) then on = true break end end
       else
-        on = sq.steps[s] and sq.steps[s].on
+        local st = sq:disp_step(s)
+        on = st and st.on
       end
       local head = (sq:playhead() == s)
       screen.level(head and (sel and 0 or 15) or (on and (sel and 4 or 7) or (sel and 12 or 1)))
-      screen.rect(x0 + ((s - 1) * (w / math.min(len, 64))), y + 1, 1, 4)
+      screen.rect(x1 + ((s - 1) * (w / shown)), y + 1, 1, 4)
     end
     screen.fill()
     screen.level(sel and 0 or 6)

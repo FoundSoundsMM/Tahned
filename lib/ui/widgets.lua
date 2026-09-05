@@ -83,7 +83,51 @@ end
 
 -- ---------------------------------------------------------------- shapes
 
--- attack/decay shape; `v` drives the decay length
+-- Envelope segments are drawn as the segment, going the way it goes: an
+-- attack climbs, a decay or release falls. The value moves the knee across
+-- the cell, so a long segment reaches the far side and a short one is over
+-- in the first few pixels. Curves are fixed exponentials, matching the
+-- engine -- there is nothing left to draw a curve control for.
+
+-- attack: rises off the floor, knee pushed right as the time grows
+function W.atk(x, y, w, h, sp, v, lv)
+  local n, e = 12, w * (0.12 + (pos(sp, v) * 0.88))
+  screen.level(lv)
+  screen.move(x, y + h)
+  for i = 1, n do
+    local t = i / n
+    screen.line(x + (t * e), y + h - (h * (t ^ 0.5)))
+  end
+  screen.line(x + w, y)
+  screen.stroke()
+end
+
+-- decay / release: falls from the top, tail stretched right as the time grows
+function W.rel(x, y, w, h, sp, v, lv)
+  local n, e = 12, w * (0.12 + (pos(sp, v) * 0.88))
+  screen.level(lv)
+  screen.move(x, y)
+  for i = 1, n do
+    local t = i / n
+    screen.line(x + (t * e), y + (h * (t ^ 0.5)))
+  end
+  screen.line(x + w, y + h)
+  screen.stroke()
+end
+
+-- a plateau: level held for as long as the value says, then gone
+function W.hold(x, y, w, h, sp, v, lv)
+  local e = x + math.max(2, w * (0.08 + (pos(sp, v) * 0.92)))
+  screen.level(lv)
+  screen.move(x, y + h)
+  screen.line(x, y)
+  screen.line(e, y)
+  screen.line(e, y + h)
+  screen.line(x + w, y + h)
+  screen.stroke()
+end
+
+-- attack then decay; `v` drives the decay length
 function W.env(x, y, w, h, sp, v, lv)
   local p = pos(sp, v)
   local pk = x + 2
@@ -95,33 +139,6 @@ function W.env(x, y, w, h, sp, v, lv)
     local t = i / n
     local dx = pk + (t * (w - 2) * (0.15 + (p * 0.85)))
     screen.line(dx, y + (h * (t ^ 0.55)))
-  end
-  screen.stroke()
-end
-
--- exponential ramp, for time-shaped values
-function W.time(x, y, w, h, sp, v, lv)
-  local p = pos(sp, v)
-  screen.level(lv)
-  screen.move(x, y + h)
-  local n = 12
-  for i = 1, n do
-    local t = i / n
-    screen.line(x + (t * w), y + h - (h * (t ^ (0.2 + ((1 - p) * 3)))))
-  end
-  screen.stroke()
-end
-
--- curve amount, drawn as the curve itself
-function W.curve(x, y, w, h, sp, v, lv)
-  local p = (pos(sp, v) * 2) - 1
-  screen.level(lv)
-  screen.move(x, y + h)
-  local n = 12
-  for i = 1, n do
-    local t = i / n
-    local e = (p >= 0) and (1 + (p * 3)) or (1 / (1 + (-p * 3)))
-    screen.line(x + (t * w), y + h - (h * (t ^ e)))
   end
   screen.stroke()
 end
@@ -192,6 +209,22 @@ function W.noise(x, y, w, h, sp, v, lv)
   for i = 0, w, 2 do
     seed = (seed * 9.13 + 0.271) % 1
     local a = seed * p * h
+    screen.move(x + i, y + (h / 2) - (a / 2))
+    screen.line(x + i, y + (h / 2) + (a / 2))
+  end
+  screen.stroke()
+end
+
+-- Noise character as one bipolar macro: coarse and dark on the left, fine
+-- and bright on the right, which is what the engine actually does with it.
+function W.ntone(x, y, w, h, sp, v, lv)
+  local p = pos(sp, v)
+  local gap = 1 + util.round((1 - p) * 5)
+  local seed = 0.443
+  screen.level(lv)
+  for i = 0, w, gap do
+    seed = (seed * 9.13 + 0.271) % 1
+    local a = (0.3 + (seed * 0.7)) * h
     screen.move(x + i, y + (h / 2) - (a / 2))
     screen.line(x + i, y + (h / 2) + (a / 2))
   end
