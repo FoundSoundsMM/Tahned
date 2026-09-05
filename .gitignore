@@ -1,0 +1,6 @@
+build/
+*.aiff
+*.wav
+*.osc
+synthdefs/
+.DS_Store
