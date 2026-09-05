@@ -12,6 +12,21 @@ local W = {}
 
 local function pos(sp, v) return S.unit_pos(sp, v) end
 
+-- connected plot of f(t) over t in 0..1, f returning -1..1. Sparse pixels
+-- read as noise at this size; a line reads as a shape.
+local function plot(x, y, w, h, lv, over, f)
+  screen.level(lv)
+  local n = math.max(2, math.floor(w * (over or 1)))
+  local mid = y + (h / 2)
+  local amp = (h / 2) - 0.5
+  screen.move(x, mid - (f(0) * amp))
+  for i = 1, n do
+    local t = i / n
+    screen.line(x + (t * w), mid - (f(t) * amp))
+  end
+  screen.stroke()
+end
+
 local function frame_line(x, y, w, lv)
   screen.level(lv)
   screen.move(x, y + 0.5)
@@ -142,54 +157,56 @@ local function opl_sample(idx, ph)
 end
 
 function W.wave(x, y, w, h, sp, v, lv)
-  screen.level(lv)
-  local mid = y + (h / 2)
-  for i = 0, w do
-    local s = opl_sample(v, (i / w) % 1)
-    screen.pixel(x + i, util.round(mid - (s * (h / 2 - 1))))
-  end
-  screen.fill()
+  plot(x, y, w, h, lv, 2, function(t) return opl_sample(v, t % 1) end)
 end
 
 function W.lfowave(x, y, w, h, sp, v, lv)
-  screen.level(lv)
-  local mid = y + (h / 2)
-  for i = 0, w do
-    local t = (i / w) % 1
-    local s
-    if v == 0 then s = 1 - (4 * math.abs(t - 0.5))
-    elseif v == 1 then s = math.sin(t * 2 * math.pi)
-    elseif v == 2 then s = (t < 0.5) and 1 or -1
-    elseif v == 3 then s = 1 - (t * 2)
-    elseif v == 4 then s = (t * 2) - 1
-    elseif v == 5 then s = (((1 - t) ^ 3) * 2) - 1
-    else s = math.sin(t * 17.3) * math.cos(t * 7.1) end
-    screen.pixel(x + i, util.round(mid - (s * (h / 2 - 1))))
-  end
-  screen.fill()
+  plot(x, y, w, h, lv, 2, function(t)
+    if v == 0 then return 1 - (4 * math.abs(t - 0.5))
+    elseif v == 1 then return math.sin(t * 2 * math.pi)
+    elseif v == 2 then return (t < 0.5) and 1 or -1
+    elseif v == 3 then return 1 - (t * 2)
+    elseif v == 4 then return (t * 2) - 1
+    elseif v == 5 then return (((1 - t) ^ 3) * 2) - 1
+    else return math.sin(t * 17.3) * math.cos(t * 7.1) end
+  end)
 end
 
 -- wavefolded sine: the glyph actually folds as the value rises
 function W.fold(x, y, w, h, sp, v, lv)
   local amt = 1 + (pos(sp, v) * 8)
-  screen.level(lv)
-  local mid = y + (h / 2)
-  for i = 0, w do
-    local s = math.sin((i / w) * 2 * math.pi) * amt
+  plot(x, y, w, h, lv, 4, function(t)
+    local s = math.sin(t * 2 * math.pi) * amt
     while s > 1 or s < -1 do
-      if s > 1 then s = 2 - s elseif s < -1 then s = -2 - s end
+      if s > 1 then s = 2 - s else s = -2 - s end
     end
-    screen.pixel(x + i, util.round(mid - (s * (h / 2 - 1))))
-  end
-  screen.fill()
+    return s
+  end)
 end
 
+-- amplitude of a noise field
 function W.noise(x, y, w, h, sp, v, lv)
   local p = pos(sp, v)
+  local seed = 0.137
   screen.level(lv)
-  math.randomseed(9137)
   for i = 0, w, 2 do
-    local a = (math.random() * p * h)
+    seed = (seed * 9.13 + 0.271) % 1
+    local a = seed * p * h
+    screen.move(x + i, y + (h / 2) - (a / 2))
+    screen.line(x + i, y + (h / 2) + (a / 2))
+  end
+  screen.stroke()
+end
+
+-- density of a noise field: white on the left, grainy on the right
+function W.grain(x, y, w, h, sp, v, lv)
+  local p = pos(sp, v)
+  local gap = 1 + util.round(p * 5)
+  local seed = 0.611
+  screen.level(lv)
+  for i = 0, w, gap do
+    seed = (seed * 9.13 + 0.271) % 1
+    local a = (0.35 + (seed * 0.65)) * h
     screen.move(x + i, y + (h / 2) - (a / 2))
     screen.line(x + i, y + (h / 2) + (a / 2))
   end
@@ -226,14 +243,9 @@ end
 
 function W.wow(x, y, w, h, sp, v, lv)
   local d = pos(sp, v)
-  screen.level(lv)
-  local mid = y + (h / 2)
-  for i = 0, w do
-    local t = i / w
-    local s = math.sin(t * 6) * d
-    screen.pixel(x + i, util.round(mid - (s * (h / 2 - 1))))
-  end
-  screen.fill()
+  plot(x, y, w, h, lv, 2, function(t)
+    return ((math.sin(t * 7.5) * 0.7) + (math.sin(t * 23) * 0.3)) * d
+  end)
 end
 
 function W.comp(x, y, w, h, sp, v, lv)
@@ -283,53 +295,50 @@ end
 
 -- ------------------------------------------------------------- structural
 
--- operator routing, drawn from the same tables the engine uses
-local ALGO3 = {
-  {"B","A","C"}, {"A|B","C"}, {"B","A+C"}, {"B","A","C"},
-  {"B","A","C"}, {"A","C+B"}, {"B","C+A"}, {"A|B|C"},
-}
+-- Operator routing, drawn from the same tables the engine patches. Each
+-- operator sits at its depth in the chain -- carriers on the baseline,
+-- modulators stacked above -- with a line to whatever it modulates.
+local function draw_algo(x, y, w, h, def, lv)
+  local depth = {}
+  for i = 1, def.ops do depth[i] = 0 end
+  -- longest path to an output; with at most four operators a few passes settle
+  for _ = 1, def.ops do
+    for _, e in ipairs(def.edges) do
+      if depth[e[1]] < depth[e[2]] + 1 then depth[e[1]] = depth[e[2]] + 1 end
+    end
+  end
+  local maxd = 0
+  for i = 1, def.ops do maxd = math.max(maxd, depth[i]) end
 
-local function op_box(x, y, lit, label)
-  screen.level(lit and 15 or 4)
-  screen.rect(x, y, 5, 5)
+  local step, bw, bh = (def.ops > 3) and 7 or 9, 5, 3
+  local function cx(i) return x + ((i - 1) * step) end
+  local function cy(i)
+    if maxd == 0 then return y + h - bh end
+    return y + h - bh - (depth[i] * ((h - bh) / maxd))
+  end
+
+  screen.level(math.max(3, lv - 6))
+  for _, e in ipairs(def.edges) do
+    screen.move(cx(e[1]) + (bw / 2), cy(e[1]) + bh)
+    screen.line(cx(e[2]) + (bw / 2), cy(e[2]))
+  end
   screen.stroke()
+
+  for i = 1, def.ops do
+    local carrier = false
+    for _, o in ipairs(def.outs) do if o == i then carrier = true end end
+    screen.level(lv)
+    screen.rect(cx(i), cy(i), bw, bh)
+    if carrier then screen.fill() else screen.stroke() end
+  end
 end
 
 function W.algo3(x, y, w, h, sp, v, lv)
-  -- three operators, stacked or side by side depending on the algorithm
-  local a = v
-  screen.level(lv)
-  local cx = x + 2
-  if a == 7 then
-    for i = 0, 2 do op_box(cx + (i * 8), y + 3, true) end
-  else
-    op_box(cx + 8, y, true)
-    op_box(cx + 8, y + 6, true)
-    op_box(cx + (a >= 4 and 0 or 8), y + 6, true)
-    screen.level(6)
-    screen.move(cx + 10, y + 5); screen.line(cx + 10, y + 6); screen.stroke()
-  end
-  screen.level(15)
-  screen.move(x + w - 4, y + h)
-  screen.text(tostring(a + 1))
+  draw_algo(x, y, w, h, C.ALGO3[v + 1] or C.ALGO3[1], lv)
 end
 
 function W.algo4(x, y, w, h, sp, v, lv)
-  local a = v
-  screen.level(lv)
-  local cx = x + 1
-  local rows = { {4}, {3}, {2}, {1} }
-  if a == 7 then
-    for i = 0, 3 do op_box(cx + (i * 6), y + 3, true) end
-  elseif a >= 5 then
-    op_box(cx, y, true); op_box(cx + 7, y, true)
-    op_box(cx, y + 6, true); op_box(cx + 7, y + 6, true)
-  else
-    for i = 0, 3 do op_box(cx + 3, y + (i * 3) - 1, true) end
-  end
-  screen.level(15)
-  screen.move(x + w - 4, y + h)
-  screen.text(tostring(a + 1))
+  draw_algo(x, y, w, h, C.ALGO4[v + 1] or C.ALGO4[1], lv)
 end
 
 function W.ratio(x, y, w, h, sp, v, lv)

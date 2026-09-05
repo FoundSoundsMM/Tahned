@@ -132,6 +132,13 @@ locking, a run of all three sequencer types, and a save/load round trip. Its
 `include()` deliberately does not cache, matching norns, so module-identity
 mistakes surface here too.
 
+```bash
+lua tools/render-screen.lua preview   # then open preview/index.html
+```
+
+Implements the norns screen API as an SVG writer and runs the script's own
+drawing code, so every page can be looked at without hardware.
+
 ## Not done yet
 
 - Never run on hardware. Nothing here has made a sound outside an offline

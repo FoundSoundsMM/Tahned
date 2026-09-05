@@ -23,6 +23,32 @@ C.CHORD_IV = {
 }
 C.NOTE_NAMES = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" }
 
+-- Operator routing, mirroring the tables in Engine_Tahned.sc. Kept here so the
+-- ALGO cell can draw the structure the engine will actually patch rather than
+-- a decorative stand-in. Edges are {from, to}; outs are the audible operators.
+-- If the engine's tables change, these must change with them.
+C.ALGO4 = {
+  { ops = 4, edges = {{4,3},{2,1}},                   outs = {1} },
+  { ops = 4, edges = {{4,3},{4,2},{3,2},{2,1}},       outs = {1} },
+  { ops = 4, edges = {{4,2},{3,2},{2,1}},             outs = {1} },
+  { ops = 4, edges = {{4,3},{3,2},{4,1}},             outs = {1,2} },
+  { ops = 4, edges = {{4,3},{3,1},{2,1}},             outs = {1} },
+  { ops = 4, edges = {{4,3},{4,2},{4,1}},             outs = {1,2,3} },
+  { ops = 4, edges = {{4,1},{3,1},{2,1}},             outs = {1} },
+  { ops = 4, edges = {},                              outs = {1,2,3,4} },
+}
+-- operators are C, A, B -- indices 1, 2, 3
+C.ALGO3 = {
+  { ops = 3, edges = {{3,2},{2,1}},       outs = {1} },
+  { ops = 3, edges = {{2,1},{3,1}},       outs = {1} },
+  { ops = 3, edges = {{3,2},{3,1}},       outs = {1} },
+  { ops = 3, edges = {{3,2},{2,1},{3,1}}, outs = {1} },
+  { ops = 3, edges = {{3,2},{2,1}},       outs = {1,2} },
+  { ops = 3, edges = {{2,1}},             outs = {1,3} },
+  { ops = 3, edges = {{3,1}},             outs = {1,2} },
+  { ops = 3, edges = {},                  outs = {1,2,3} },
+}
+
 C.master = { name = "MASTER", params = {
   { k = "mach", name = "MACHINE", g = "mach", opts = S.MACHINE, min = 0, max = 2, def = 0 },
   S.c(0, "LEVEL",  { def = 100 }),

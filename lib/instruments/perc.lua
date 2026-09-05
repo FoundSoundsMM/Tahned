@@ -55,7 +55,7 @@ return {
       S.c(35, "T.LEV",  { def = 0 }),
       S.c(36, "BASE",   { def = 70, g = "filt" }),
       S.c(37, "WIDTH",  { def = 40 }),
-      S.c(38, "GRAIN",  { def = 0,  g = "noise" }),
+      S.c(38, "GRAIN",  { def = 0,  g = "grain" }),
       S.c(39, "N.LEV",  { def = 0,  g = "noise" }),
     }},
   },
