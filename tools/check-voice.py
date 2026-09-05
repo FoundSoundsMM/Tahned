@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Measure the renders written by tools/check-voice.sh.
 
-Three questions. Does the default PERC patch behave like an 808 kick -- a low
-sine that holds for around a second? Does SWEEP actually bend the pitch, which
-is the thing that looked like a control and was not doing anything? And does a
-held TONE note follow a parameter turned under it?
+Three questions. Do all five drum machines make a sound at the settings they
+ship with, and is KICK an 808 kick -- a low sine that holds for around half a
+second? Does SWEEP actually bend the pitch, which is the thing that looked
+like a control and was not doing anything? And does a held TONE note follow a
+parameter turned under it?
 
-Pitch is read from zero crossings. The bodies are sines at these settings, so
-crossings are the cleanest estimate available without a transform.
+Pitch is read from zero crossings. The kick's body is a sine at these
+settings, so crossings are the cleanest estimate available without a
+transform; anything with a cluster in it is measured spectrally instead.
 """
 import struct, sys, os, math
 
@@ -102,45 +104,95 @@ def centroid(s, sr, t0, t1, n=8192):
 
 work = sys.argv[1]
 fails = []
-res = {}
 
-print("\n  render     peak   cycles<60ms  f0 @300ms  rms@0.5s  rms@1.5s")
-print("  " + "-" * 62)
-for name in ("default", "flat"):
-    p = os.path.join(work, f"perc-{name}.wav")
+
+def load(tag):
+    p = os.path.join(work, f"voice-{tag}.wav")
     if not os.path.exists(p):
-        print(f"  {name:10s} NOT RENDERED"); fails.append(f"{name} not rendered"); continue
+        return None
     sr, ch, s = read_wav_f32(p)
-    if ch > 1: s = s[0::ch]
-    r = dict(peak=max(abs(v) for v in s),
-             cyc=cycles(s, sr, 0.001, 0.061),
-             late=f0(s, sr, 0.30, 0.70),
-             mid=rms(s, sr, 0.45, 0.55),
-             end=rms(s, sr, 1.45, 1.55))
-    res[name] = r
-    print(f"  {name:10s} {r['peak']:5.3f}  {r['cyc']:10d} {r['late']:10.1f}"
-          f"  {r['mid']:9.5f} {r['end']:9.5f}")
-print()
+    if ch > 1:
+        s = s[0::ch]
+    return sr, s
 
-d, f = res.get("default"), res.get("flat")
+
 def want(ok, msg):
     print(("  ok    " if ok else "  FAIL  ") + msg)
-    if not ok: fails.append(msg)
+    if not ok:
+        fails.append(msg)
 
-if d:
-    want(0.05 < d["peak"] <= 1.0,
-         f"the default hit sounds and stays under full scale ({d['peak']:.3f})")
-    want(40 < d["late"] < 58,
-         f"it settles on an 808 kick fundamental ({d['late']:.1f} Hz, want ~49)")
-    want(d["mid"] > 0.01, f"still sounding half a second in ({d['mid']:.4f})")
-    want(d["end"] < d["mid"] * 0.2, "and gone by a second and a half")
+
+# ------------------------------------------------------------------ drums
+# Each machine is asked the same two questions -- does it sound, and does it
+# stop -- plus one about where its energy sits, which is what tells a kick
+# from a hat without listening to either.
+DRUMS = [
+    #  tag            centroid Hz      how long it should still be sounding
+    ("kick-default", (20, 400),        (0.15, 1.6)),
+    ("snare",        (600, 8000),      (0.05, 1.6)),
+    ("hat",          (2000, 20000),    (0.01, 0.7)),
+    ("tom",          (40, 900),        (0.10, 2.2)),
+    ("cymb",         (1500, 20000),    (0.5, 4.0)),
+]
+
+print("\n  machine        peak    centroid   rms@10ms   tail ends")
+print("  " + "-" * 58)
+meas = {}
+for tag, (clo, chi), (tlo, thi) in DRUMS:
+    got = load(tag)
+    if not got:
+        print(f"  {tag:14s} NOT RENDERED")
+        fails.append(f"{tag} not rendered")
+        continue
+    sr, s = got
+    peak = max(abs(v) for v in s)
+    cen = centroid(s, sr, 0.002, 0.2)
+    head = rms(s, sr, 0.005, 0.015)
+    # where the tail drops under a thousandth of the peak and stays there
+    ends = 0.0
+    step = 0.02
+    t = 0.0
+    while t < len(s) / sr - step:
+        if rms(s, sr, t, t + step) > peak * 0.001:
+            ends = t + step
+        t += step
+    meas[tag] = dict(peak=peak, cen=cen, head=head, ends=ends)
+    print(f"  {tag:14s} {peak:5.3f} {cen:10.0f} {head:10.5f} {ends:9.2f}s")
+print()
+
+for tag, (clo, chi), (tlo, thi) in DRUMS:
+    m = meas.get(tag)
+    if not m:
+        continue
+    want(0.02 < m["peak"] <= 1.0,
+         f"{tag} sounds and stays under full scale ({m['peak']:.3f})")
+    want(clo <= m["cen"] <= chi,
+         f"{tag} puts its energy where that drum lives "
+         f"({m['cen']:.0f} Hz, want {clo}..{chi})")
+    want(tlo <= m["ends"] <= thi,
+         f"{tag} stops when it should ({m['ends']:.2f}s, want {tlo}..{thi})")
+
+# ------------------------------------------------------------------- kick
+# The 808 is the one that has a right answer: TUNE at -5 semitones off the
+# trigger note is 49 Hz, and SWEEP starts it two octaves over that. The pitch
+# window has to sit inside the body -- past a couple of hundred milliseconds
+# the kick is already gone, and crossings of what is left mean nothing.
+print()
+d, f = load("kick-default"), load("kick-flat")
 if d and f:
-    want(d["cyc"] >= f["cyc"] + 1,
-         f"SWEEP bends the pitch: {d['cyc']} cycles in the first 60ms against "
-         f"{f['cyc']} with it centred")
-    want(abs(d["late"] - f["late"]) < 3,
+    dsr, ds = d
+    fsr, fs = f
+    dlate, flate = f0(ds, dsr, 0.05, 0.25), f0(fs, fsr, 0.05, 0.25)
+    dcyc, fcyc = cycles(ds, dsr, 0.001, 0.061), cycles(fs, fsr, 0.001, 0.061)
+    want(40 < dlate < 58,
+         f"the kick settles on an 808 fundamental ({dlate:.1f} Hz, want ~49)")
+    want(dcyc >= fcyc + 1,
+         f"SWEEP bends the pitch: {dcyc} cycles in the first 60ms against "
+         f"{fcyc} with it centred")
+    want(abs(dlate - flate) < 3,
          f"and both land on the same pitch once it has settled "
-         f"({d['late']:.1f} / {f['late']:.1f} Hz)")
+         f"({dlate:.1f} / {flate:.1f} Hz)")
+
 # ------------------------------------------------------------------- tone
 # A note is held for the whole render. In "live" the carrier's frequency
 # multiplier is moved from 3 to 1 a second in. That value used to be latched
@@ -151,7 +203,7 @@ print("             @0.7s      @2.0s")
 print("  " + "-" * 52)
 tone = {}
 for name in ("held", "live"):
-    p = os.path.join(work, f"tone-{name}.wav")
+    p = os.path.join(work, f"voice-tone-{name}.wav")
     if not os.path.exists(p):
         print(f"  {name:10s} NOT RENDERED"); fails.append(f"tone-{name} not rendered"); continue
     sr, ch, s2 = read_wav_f32(p)
@@ -180,4 +232,4 @@ if lv:
 print()
 if fails:
     print(f"FAIL: {len(fails)} check(s)"); sys.exit(1)
-print("PASS: PERC is an 808 kick, SWEEP sweeps, and held notes follow the bus")
+print("PASS: all five drums sound, KICK is an 808, and held notes follow the bus")

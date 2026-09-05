@@ -5,8 +5,9 @@
 --
 -- Switching machine is non-destructive. Channels 8..39 mean different things
 -- per machine, so each track keeps a slot per machine holding those values,
--- its sequencer settings and its pattern. Master, filter, colour and the LFOs
--- are shared across machines and live directly on the track.
+-- its sequencer settings and its pattern. Mix, filter and the LFOs are shared
+-- across machines and live directly on the track. COLOUR is not per track at
+-- all any more -- it is one chain on the master.
 
 local S = include("tahned/lib/core/spec")
 local I = include("tahned/lib/instruments/init")
@@ -28,10 +29,11 @@ function Track.new(idx)
   t.mute = false
   t.v = {}            -- shared channels, [ch] = display value
   t.slot = {}         -- per machine: syn channels, seq settings, pattern
-  t.page = { 1, 1, 1 }
+  t.page = {}
 
-  for m = 1, 3 do
+  for m = 1, I.n do
     t.slot[m] = { v = {}, s = {}, seq = nil }
+    t.page[m] = 1
   end
 
   -- shared defaults come from any machine's page list
@@ -41,7 +43,7 @@ function Track.new(idx)
     end
   end
 
-  for m = 1, 3 do
+  for m = 1, I.n do
     for _, page in ipairs(I.pages_for(m)) do
       for _, sp in ipairs(page.params) do
         if is_syn(sp.ch) then t.slot[m].v[sp.ch] = sp.def
@@ -164,7 +166,7 @@ function Track:set_mute(m)
 end
 
 function Track:set_machine(m)
-  m = util.clamp(m, 1, 3)
+  m = util.clamp(m, 1, I.n)
   if m == self.machine then return end
   self:seq():stop()
   self.machine = m
@@ -187,11 +189,6 @@ end
 
 function Track:note_off(id)
   engine.noteOff(self.idx - 1, id)
-end
-
-function Track:amb_trig(lane, v)
-  if self.mute then return end
-  engine.ambTrig(self.idx - 1, lane - 1, v)
 end
 
 return Track

@@ -10,7 +10,9 @@
 
 local S = include("tahned/lib/core/spec")
 
-local MOD_DEST = {"INDEX","PITCH","FOLD","CUTOFF","FEEDBK","OP4"}
+-- The mod EG has two of these, so one envelope can open the filter and push
+-- the index at once -- which is most of what a second envelope was ever for.
+local MOD_DEST = {"OFF","INDEX","PITCH","FOLD","CUTOFF","FEEDBK","OP4"}
 
 return {
   id = "tone",
@@ -39,12 +41,15 @@ return {
       S.c(22, "INDEX", { def = 40 }),
       S.c(23, "FOLD",  { def = 0, g = "fold" }),
     }},
+    -- CYCLE is one control over both envelopes rather than a LOOP switch on
+    -- each: the pair was never usefully split, and folding them frees the
+    -- cell the mod EG's second destination needs.
     { name = "AMP EG", params = {
       S.c(24, "ATK",    { def = 8,  g = "atk" }),
       S.c(25, "DEC",    { def = 40, g = "rel" }),
       S.c(26, "SUS",    { def = 90, g = "bar" }),
       S.c(27, "REL",    { def = 40, g = "rel" }),
-      S.e(28, "LOOP",   {"OFF","CYCLE"}),
+      S.e(28, "CYCLE",  {"OFF","AMP","MOD","BOTH"}),
       S.c(29, "VEL",    { def = 80 }),
       -- pans a chord across the field by pitch, low to high; not a pan offset
       S.b(30, "SPREAD", { def = 0, g = "pan" }),
@@ -54,9 +59,10 @@ return {
       S.c(32, "DEC",   { def = 50, g = "rel" }),
       S.c(33, "SUS",   { def = 0,  g = "bar" }),
       S.c(34, "REL",   { def = 50, g = "rel" }),
-      S.e(35, "LOOP",  {"OFF","CYCLE"}),
-      S.e(36, "DEST",  MOD_DEST),
-      S.b(37, "DEPTH", { def = 0 }),
+      S.e(35, "DEST A", MOD_DEST, { def = 1 }),
+      S.b(36, "DEP A", { def = 0 }),
+      S.e(37, "DEST B", MOD_DEST, { def = 0 }),
+      S.b(38, "DEP B", { def = 0 }),
     }},
   },
 }

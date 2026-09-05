@@ -127,22 +127,6 @@ function W.hold(x, y, w, h, sp, v, lv)
   screen.stroke()
 end
 
--- attack then decay; `v` drives the decay length
-function W.env(x, y, w, h, sp, v, lv)
-  local p = pos(sp, v)
-  local pk = x + 2
-  screen.level(lv)
-  screen.move(x, y + h)
-  screen.line(pk, y)
-  local n = 10
-  for i = 1, n do
-    local t = i / n
-    local dx = pk + (t * (w - 2) * (0.15 + (p * 0.85)))
-    screen.line(dx, y + (h * (t ^ 0.55)))
-  end
-  screen.stroke()
-end
-
 -- rising or falling sweep
 function W.sweep(x, y, w, h, sp, v, lv)
   local p = (pos(sp, v) * 2) - 1
@@ -231,21 +215,6 @@ function W.ntone(x, y, w, h, sp, v, lv)
   screen.stroke()
 end
 
--- density of a noise field: white on the left, grainy on the right
-function W.grain(x, y, w, h, sp, v, lv)
-  local p = pos(sp, v)
-  local gap = 1 + util.round(p * 5)
-  local seed = 0.611
-  screen.level(lv)
-  for i = 0, w, gap do
-    seed = (seed * 9.13 + 0.271) % 1
-    local a = (0.35 + (seed * 0.65)) * h
-    screen.move(x + i, y + (h / 2) - (a / 2))
-    screen.line(x + i, y + (h / 2) + (a / 2))
-  end
-  screen.stroke()
-end
-
 local function tanh(z)
   local e = math.exp(2 * z)
   return (e - 1) / (e + 1)
@@ -272,6 +241,12 @@ function W.bits(x, y, w, h, sp, v, lv)
     screen.rect(xs, ys, w / n, 1)
   end
   screen.fill()
+end
+
+-- a rate: the same wave, cycling faster as the value climbs
+function W.rate(x, y, w, h, sp, v, lv)
+  local n = 1 + (pos(sp, v) * 7)
+  plot(x, y, w, h, lv, 3, function(t) return math.sin(t * n * 2 * math.pi) end)
 end
 
 function W.wow(x, y, w, h, sp, v, lv)
@@ -366,10 +341,6 @@ local function draw_algo(x, y, w, h, def, lv)
   end
 end
 
-function W.algo3(x, y, w, h, sp, v, lv)
-  draw_algo(x, y, w, h, C.ALGO3[v + 1] or C.ALGO3[1], lv)
-end
-
 function W.algo4(x, y, w, h, sp, v, lv)
   draw_algo(x, y, w, h, C.ALGO4[v + 1] or C.ALGO4[1], lv)
 end
@@ -409,15 +380,6 @@ function W.tilt(x, y, w, h, sp, v, lv)
   screen.stroke()
 end
 
-function W.voices(x, y, w, h, sp, v, lv)
-  local n = util.round(1 + (pos(sp, v) * 5))
-  for i = 1, 6 do
-    screen.level(i <= n and lv or 2)
-    screen.rect(x + ((i - 1) * 4), y + h - 4, 3, 3)
-    screen.fill()
-  end
-end
-
 function W.ratchet(x, y, w, h, sp, v, lv)
   local n = util.round(v)
   screen.level(lv)
@@ -427,14 +389,6 @@ function W.ratchet(x, y, w, h, sp, v, lv)
     screen.line(px, y)
   end
   screen.stroke()
-end
-
-function W.lane(x, y, w, h, sp, v, lv)
-  for i = 1, 8 do
-    screen.level(i == v and 15 or 3)
-    screen.rect(x + ((i - 1) * 3), y + h - 4, 2, 3)
-    screen.fill()
-  end
 end
 
 function W.dir(x, y, w, h, sp, v, lv)
@@ -488,47 +442,71 @@ function W.chord(x, y, w, h, sp, v, lv)
   screen.fill()
 end
 
--- start phase of an operator, or free running
-function W.phase(x, y, w, h, sp, v, lv)
-  local free = (S.unit_pos(sp, v) > 0.99)
-  local mid = y + (h / 2)
-  screen.level(free and 4 or lv)
-  for i = 0, w do
-    screen.pixel(x + i, util.round(mid - (math.sin((i / w) * 2 * math.pi) * (h / 2 - 1))))
-  end
-  screen.fill()
-  if not free then
-    local px = x + (S.unit_pos(sp, v) / 0.99 * 0.25 * w)
-    screen.level(15)
-    screen.move(px, y); screen.line(px, y + h); screen.stroke()
-  end
-end
-
 function W.mach(x, y, w, h, sp, v, lv) end
 function W.enum(x, y, w, h, sp, v, lv) end
 function W.dest(x, y, w, h, sp, v, lv) end
 function W.leader(x, y, w, h, sp, v, lv) end
 function W.scale(x, y, w, h, sp, v, lv) end
-function W.trans(x, y, w, h, sp, v, lv)
+-- the sharp front of a drum: a spike whose height is the transient level
+function W.click(x, y, w, h, sp, v, lv)
+  local p = pos(sp, v)
   screen.level(lv)
-  if v == 0 then
-    screen.move(x + 4, y + h); screen.line(x + 4, y); screen.stroke()
-  elseif v == 1 then
-    for i = 0, 6, 2 do screen.pixel(x + i, y + ((i * 3) % h)) end
-    screen.fill()
-  elseif v == 2 then
-    screen.move(x, y + 1)
-    for i = 1, 10 do screen.line(x + (i * 2), y + 1 + ((h - 2) * (i / 10))) end
-    screen.stroke()
-  else
-    for i = 0, 4 do
-      screen.move(x + (i * 4), y + h)
-      screen.line(x + (i * 4), y + (h * ((i % 2) * 0.6)))
-    end
-    screen.stroke()
-  end
+  screen.move(x, y + h)
+  screen.line(x + 2, y + h - (h * p))
+  screen.line(x + 4, y + h - (h * p * 0.25))
+  screen.line(x + w, y + h)
+  screen.stroke()
+  frame_line(x, y + h, w, 2)
 end
-W.lfo = W.lfowave
+
+-- a resonant band sitting where the value puts it, which is what a drum's
+-- TONE control moves rather than a corner frequency
+function W.band(x, y, w, h, sp, v, lv)
+  local c = x + (pos(sp, v) * (w - 2)) + 1
+  screen.level(lv)
+  screen.move(x, y + h)
+  screen.line(c - 4, y + h - 1)
+  screen.line(c, y)
+  screen.line(c + 4, y + h - 1)
+  screen.line(x + w, y + h)
+  screen.stroke()
+end
+
+-- how much of the signal survives a lossy codec: the top of the band eaten
+-- away and what is left smeared
+function W.loss(x, y, w, h, sp, v, lv)
+  local p = pos(sp, v)
+  local edge = w * (1 - (p * 0.8))
+  screen.level(lv)
+  for i = 0, w - 1, 2 do
+    local a = (i < edge) and (1 - (p * 0.35 * (i / w))) or (p * 0.12)
+    screen.move(x + i, y + h)
+    screen.line(x + i, y + h - math.max(0.5, h * a))
+  end
+  screen.stroke()
+end
+
+-- digital dropout: a run of samples repeated, with a hole punched in it
+function W.glitch(x, y, w, h, sp, v, lv)
+  local p = pos(sp, v)
+  local seed = 0.317
+  screen.level(lv)
+  local held, hy = 0, h * 0.5
+  for i = 0, w - 1, 1 do
+    seed = (seed * 9.13 + 0.271) % 1
+    if held <= 0 then
+      held = 1 + math.floor(seed * p * 6)
+      hy = (0.15 + (seed * 0.7)) * h
+    end
+    held = held - 1
+    if seed > (0.94 - (p * 0.3)) then hy = 0 end
+    if hy > 0 then
+      screen.move(x + i, y + h)
+      screen.line(x + i, y + h - hy)
+    end
+  end
+  screen.stroke()
+end
 
 function W.draw(name, x, y, w, h, sp, v, lv, extra)
   local f = W[name] or W.bar

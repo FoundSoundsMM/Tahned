@@ -21,16 +21,15 @@ S.NULL_DEST = 88   -- a channel nothing reads
 S.WAVES   = {"SIN","HSIN","ASIN","PSIN","ESIN","CAML","SQR","SAW"}
 -- the chip's frequency multipliers; it repeats 10, 12 and 15, dropped here
 S.MULTS   = {"0.5","1","2","3","4","5","6","7","8","9","10","12","15"}
--- percussion gets inharmonic ratios the chip never had
+-- drums get inharmonic ratios the chip never had
 S.RATIOS  = {"0.25","0.5","0.75","1","1.25","1.5","1.75","2",
              "2.5","3","3.5","4","5","6","8","11"}
 S.FILTERS = {"LP","BP","HP","COMB"}
 S.LFOWAVE = {"TRI","SIN","SQR","SAW","RMP","EXP","RND","S&H"}
 S.LFOMODE = {"FREE","TRIG","HOLD","ONE"}
 S.LFOMULT = {"x1","x2","x4","x8","x16","x32","x64","x128"}
-S.MACHINE = {"PERC","TONE","AMB"}
+S.MACHINE = {"KICK","SNARE","HAT","TOM","CYMB","TONE"}
 S.DIRS    = {"FWD","REV","PNG","RND","BRN"}
-S.TRANS   = {"CLICK","TICK","THUMP","METAL"}
 
 local function base(ch, name, o)
   o = o or {}

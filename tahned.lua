@@ -4,21 +4,23 @@
 --
 -- E1 track   E2 cursor   E3 value
 -- K1 shift   K2 page back   K3 page forward   (pages do not wrap)
--- K2+K3 master: track select, transport and the three sends
+-- K2+K3 master: its own pages -- OVER PERFORM MIX COLOUR CLOCK and the sends
 --
--- K1+E2 jump pages   K1+E3 coarse
+-- K1+E2 jump pages   K1+E3 coarse   K1+K3 play/stop   K1+K2 reset
 -- hold grid steps and turn E3 to lock a parameter to all of them
 
 engine.name = "Tahned"
 
 local S     = include("tahned/lib/core/spec")
 local M     = include("tahned/lib/core/master")
+local I     = include("tahned/lib/instruments/init")
 local state = include("tahned/lib/core/state")
 local P     = include("tahned/lib/ui/pages")
 local G     = include("tahned/lib/ui/grid_ui")
 local Track = include("tahned/lib/core/track")
 
 local combo = false
+local shifted = {}
 local screen_metro, grid_metro
 
 -- ------------------------------------------------------------------- params
@@ -26,13 +28,15 @@ local screen_metro, grid_metro
 local function build_params()
   params:add_separator("tahned", "TAHNED")
 
+  -- PERFORM, COLOUR and the three sends are all built the same way: a group
+  -- of controls whose action hands the value to the group's own engine
+  -- command. The master pages turn these same params.
   for _, key in ipairs(M.order) do
-    local fx = M.fx[key]
-    params:add_group("fx_" .. key, fx.name, #fx.p)
-    for _, e in ipairs(fx.p) do
-      local id = key .. "_" .. e[1]
-      params:add_control(id, e[2], e[3])
-      params:set_action(id, function(v) engine.fxSet(key, e[1], v) end)
+    local g = M.groups[key]
+    params:add_group("master_" .. key, g.name, #g.p)
+    for _, e in ipairs(g.p) do
+      params:add_control(e.param, e.name, e.spec)
+      params:set_action(e.param, function(v) g.send(e, v) end)
     end
   end
 
@@ -64,25 +68,14 @@ end
 -- Bumped when the channel map moves under a machine, since a slot's values
 -- and a step's locks are both keyed by channel and would land on the wrong
 -- parameter otherwise.
-local DATA_VERSION = 2
+local DATA_VERSION = 3
 
 function state.serialize()
   local out = { v = DATA_VERSION, sel = state.sel, tracks = {} }
   for i, t in ipairs(state.tracks) do
     local e = { machine = t.machine, mute = t.mute, v = t.v, page = t.page, slot = {} }
-    for m = 1, 3 do
-      local sq = t.slot[m].seq
-      local s = { v = t.slot[m].v, s = t.slot[m].s }
-      if sq.kind == "amb" then
-        s.lane = {}
-        for l = 1, 8 do
-          s.lane[l] = { steps = sq.lane[l].steps, length = sq.lane[l].length,
-                        speed = sq.lane[l].speed }
-        end
-      else
-        s.steps = sq.steps
-      end
-      e.slot[m] = s
+    for m = 1, I.n do
+      e.slot[m] = { v = t.slot[m].v, s = t.slot[m].s, steps = t.slot[m].seq.steps }
     end
     out.tracks[i] = e
   end
@@ -103,24 +96,14 @@ function state.deserialize(d)
       t.mute = e.mute or false
       t.v = e.v or t.v
       t.page = e.page or t.page
-      for m = 1, 3 do
+      for m = 1, I.n do
         local s = e.slot and e.slot[m]
         local sq = t.slot[m].seq
         if s then
           t.slot[m].v = s.v or t.slot[m].v
           t.slot[m].s = s.s or t.slot[m].s
           sq.s = t.slot[m].s
-          if sq.kind == "amb" and s.lane then
-            for l = 1, 8 do
-              if s.lane[l] then
-                sq.lane[l].steps  = s.lane[l].steps or {}
-                sq.lane[l].length = s.lane[l].length or 16
-                sq.lane[l].speed  = s.lane[l].speed or 5
-              end
-            end
-          else
-            sq.steps = s.steps or {}
-          end
+          sq.steps = s.steps or {}
         end
       end
       t.machine = e.machine or 1
@@ -137,7 +120,7 @@ end
 -- Exposed on purpose: include() hands every caller its own copy of a module,
 -- so this is the only handle on the live ones -- for the maiden repl and for
 -- tools/check-lua.lua.
-tahned = { state = state, grid = G, pages = P }
+tahned = { state = state, grid = G, pages = P, instruments = I, master = M }
 
 function init()
   state.init()
@@ -187,8 +170,14 @@ function key(n, z)
   if z == 1 then
     if state.k2 and state.k3 then
       combo = true
-      state.mode = (state.mode == "select") and "page" or "select"
+      state.mode = (state.mode == "master") and "page" or "master"
       G.kb_panic()
+      state.dirty = true
+    elseif state.shift then
+      -- K2 and K3 are page navigation in both modes now, so transport moves
+      -- under shift: K1+K3 runs and stops, K1+K2 sends every track home
+      shifted[n] = true
+      if n == 3 then state.toggle_play() else state.reset() end
       state.dirty = true
     end
     return
@@ -199,10 +188,10 @@ function key(n, z)
     if not state.k2 and not state.k3 then combo = false end
     return
   end
+  if shifted[n] then shifted[n] = nil return end
 
-  if state.mode == "select" then
-    if n == 2 then state.mode = "page"
-    else state.toggle_play() end
+  if state.mode == "master" then
+    if n == 2 then state.master_page_back() else state.master_page_fwd() end
   else
     if n == 2 then state.page_back() else state.page_fwd() end
   end
@@ -219,11 +208,12 @@ function enc(n, d)
     return
   end
 
-  -- select mode is the master page: E2 walks the sends, K1+E2 jumps group,
+  -- the master has its own pages: E2 walks the cells, K1+E2 jumps page,
   -- E3 turns whatever is under the cursor
-  if state.mode == "select" then
+  if state.mode == "master" then
     if n == 2 then
-      if state.shift then state.master_group_move(d) else state.master_move(d) end
+      if state.shift then state.set_master_page(state.mpage + d)
+      else state.master_move(d) end
     else
       state.master_edit(state.shift and (d * 10) or d)
     end

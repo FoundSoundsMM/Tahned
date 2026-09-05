@@ -162,11 +162,14 @@ check("init", function() init() end)
 -- everything below goes through the live ones the script exposes
 local state = tahned.state
 local G = tahned.grid
+local NM = tahned.instruments.n          -- machines: five drums and TONE
+local TONE = NM                          -- TONE is the last of them
+local MPAGES = #tahned.master.pages
 
 check("every page of every machine redraws", function()
   local st = state
   for t = 1, 8 do
-    for m = 1, 3 do
+    for m = 1, NM do
       st.tracks[t]:set_machine(m)
       st.select_track(t)
       for p = 1, #st.tracks[t].pages do
@@ -189,17 +192,37 @@ check("page navigation clamps at both ends", function()
   assert(st.page() == #st.tracks[1].pages, "page ran off the back")
 end)
 
-check("K2+K3 toggles select mode", function()
+check("K2+K3 toggles the master mode", function()
   local st = state
   key(2, 1); key(3, 1); key(3, 0); key(2, 0)
-  assert(st.mode == "select", "did not enter select")
+  assert(st.mode == "master", "did not enter master")
   key(2, 1); key(3, 1); key(3, 0); key(2, 0)
-  assert(st.mode == "page", "did not leave select")
+  assert(st.mode == "page", "did not leave master")
+end)
+
+check("K1+K3 runs and stops without moving the page", function()
+  local st = state
+  st.mode = "page"
+  st.select_track(1)
+  st.set_page(2)
+  local p0 = st.page()
+  st.shift = true
+  key(3, 1); key(3, 0)
+  assert(st.playing, "K1+K3 did not start the transport")
+  key(3, 1); key(3, 0)
+  assert(not st.playing, "K1+K3 did not stop it again")
+  key(2, 1); key(2, 0)                       -- K1+K2 is reset, not page back
+  st.shift = false
+  assert(st.page() == p0, "a shifted key moved the page")
+  -- and unshifted the same keys still page
+  key(3, 1); key(3, 0)
+  assert(st.page() == p0 + 1, "K3 did not page forward")
+  key(2, 1); key(2, 0)
 end)
 
 check("encoders move cursor and edit values on every page", function()
   local st = state
-  for m = 1, 3 do
+  for m = 1, NM do
     st.tracks[1]:set_machine(m)
     for p = 1, #st.tracks[1].pages do
       st.set_page(p)
@@ -215,7 +238,7 @@ end)
 
 check("grid draws and takes presses for each machine", function()
   local st = state
-  for m = 1, 3 do
+  for m = 1, NM do
     st.tracks[st.sel]:set_machine(m)
     G.redraw()
     for y = 1, 8 do
@@ -234,7 +257,7 @@ end)
 check("no label is wide enough to run into the next cell", function()
   local st = state
   local seen, over = {}, {}
-  for m = 1, 3 do
+  for m = 1, NM do
     st.tracks[1]:set_machine(m)
     for _, page in ipairs(st.tracks[1].pages) do
       for _, sp in ipairs(page.params) do
@@ -242,6 +265,15 @@ check("no label is wide enough to run into the next cell", function()
           seen[sp.name] = true
           if #sp.name > 6 then table.insert(over, sp.name .. " (" .. #sp.name .. ")") end
         end
+      end
+    end
+  end
+  -- the master pages draw in the same cells, so they are held to the same width
+  for _, page in ipairs(tahned.master.pages) do
+    for _, e in ipairs(page.p or {}) do
+      if not seen[e.name] then
+        seen[e.name] = true
+        if #e.name > 6 then table.insert(over, e.name .. " (" .. #e.name .. ")") end
       end
     end
   end
@@ -255,7 +287,7 @@ check("holding several steps locks all of them, silently", function()
   st.tracks[1]:set_machine(1)
   local sq = st.seq()
   sq:clear()
-  st.set_page(3)                            -- PERC / FM
+  st.set_page(3)                            -- KICK / SYNTH
   st.cursor = 1                             -- TUNE
   local sp = st.cur_spec()
   local before = engine_calls.pset or 0
@@ -308,28 +340,77 @@ check("rotating slides the pattern the grid and screen draw", function()
   sq:clear()
 end)
 
-check("the master page walks and turns the sends", function()
+check("the master pages walk, and each kind turns what it holds", function()
   local st = state
-  st.mode = "select"
-  st.mgroup, st.mcursor = 1, 1
-  assert(st.master_param().id == "clock_tempo", "clock is not first")
+  st.mode = "master"
+  st.mpage, st.mcursor = 1, 1
+
+  -- K2 and K3 walk the master's own pages, and do not wrap
+  for _ = 1, MPAGES + 5 do key(3, 1); key(3, 0) end
+  assert(st.mpage == MPAGES, "master pages ran off the back: " .. st.mpage)
+  for _ = 1, MPAGES + 5 do key(2, 1); key(2, 0) end
+  assert(st.mpage == 1, "master pages ran off the front: " .. st.mpage)
+
+  -- MIX: E2 walks the eight tracks and E3 turns the one under the cursor
+  st.set_master_page(3)
+  assert(st.master_page().kind == "mix", "page 3 is not MIX")
+  enc(2, 2)
+  assert(st.mcursor == 3, "E2 did not walk the faders")
+  local t3 = st.tracks[3]
+  local lvl = t3.chspec[0]
+  local v0 = t3:get(lvl)
+  enc(3, -6)
+  assert(t3:get(lvl) ~= v0, "E3 did not move track 3's fader")
+  redraw()
+
+  -- COLOUR and PERFORM are norns params, turned the same way the sends are
+  for _, page in ipairs({ 2, 4 }) do
+    st.set_master_page(page)
+    st.mcursor = 1
+    for c = 1, #st.master_page().p do
+      st.mcursor = c
+      local e = st.master_param()
+      local p0 = params:get(e.param)
+      enc(3, 5)
+      assert(params:get(e.param) ~= p0, "E3 did not turn " .. e.param)
+    end
+    redraw()
+  end
+
+  -- SEND FX points at the same params the full pages hold
+  st.set_master_page(5)
+  assert(st.master_page().name == "SEND FX", "page 5 is not SEND FX")
+  st.mcursor = 1
+  assert(st.master_param().param == "rev_size", "SEND FX does not start on the reverb")
+  local sz = params:get("rev_size")
+  enc(3, 5)
+  assert(params:get("rev_size") ~= sz, "E3 did not turn the reverb from SEND FX")
+  redraw()
+
+  -- the clock still lands under the cursor the moment you reach its page
+  st.set_master_page(6)
+  st.mcursor = 1
+  assert(st.master_param().param == "clock_tempo", "page 6 is not the clock")
   local t0 = params:get("clock_tempo")
   enc(3, 4)
   assert(params:get("clock_tempo") ~= t0, "E3 did not move the tempo")
 
-  -- K1+E2 jumps group, E2 walks inside it, E3 turns what is under the cursor
+  -- K1+E2 jumps whole pages
   st.shift = true
   enc(2, 3)
   st.shift = false
-  assert(st.master_group().name == "REVERB", "K1+E2 landed on " .. st.master_group().name)
+  assert(st.mpage == 9 and st.master_page().name == "REVERB",
+    "K1+E2 landed on " .. st.master_page().name)
   enc(2, 2)
-  local sp = st.master_param()
-  assert(sp and sp.id:match("^rev_"), "E2 left the group")
-  local v0 = params:get(sp.id)
+  local e = st.master_param()
+  assert(e and e.param:match("^rev_"), "E2 left the page")
+  local rv = params:get(e.param)
   enc(3, 6)
-  assert(params:get(sp.id) ~= v0, "E3 did not turn " .. sp.id)
+  assert(params:get(e.param) ~= rv, "E3 did not turn " .. e.param)
   redraw()
-  st.mgroup, st.mcursor = 1, 1
+
+  st.set_master_page(1)
+  redraw()
   st.mode = "page"
 end)
 
@@ -365,7 +446,7 @@ check("keyboard notes survive a scale change while held", function()
   local st = state
   st.mode = "page"
   st.select_track(1)
-  st.tracks[1]:set_machine(2)                -- tone
+  st.tracks[1]:set_machine(TONE)
   local sq = st.seq()
   st.lock_step = nil
   local before = voice_count()
@@ -390,30 +471,38 @@ check("keyboard notes survive a scale change while held", function()
   -- and dropping into select mode with a pad down releases it
   G.g.key(5, 8, 1)
   assert(voice_count() == before + 1, "keyboard pad did not sound")
-  st.mode = "select"
+  st.mode = "master"
   G.g.key(1, 1, 1); G.g.key(1, 1, 0)
-  assert(voice_count() == before, "note left hanging entering select mode")
+  assert(voice_count() == before, "note left hanging entering master mode")
   st.mode = "page"
   st.select_track(1)
 end)
 
-check("select mode grid selects tracks, machines, mutes, transport", function()
+check("master grid selects tracks, all six machines, mutes, transport", function()
   local st = state
-  st.mode = "select"
+  st.mode = "master"
   G.redraw()
   G.g.key(1, 5, 1); G.g.key(1, 5, 0)
   assert(st.sel == 5, "track select failed")
-  G.g.key(11, 5, 1); G.g.key(11, 5, 0)
-  assert(st.tracks[5].machine == 2, "machine select failed")
-  G.g.key(14, 5, 1); G.g.key(14, 5, 0)
+  -- columns 8..13 are the six machines, in order
+  for m = 1, NM do
+    G.g.key(7 + m, 5, 1); G.g.key(7 + m, 5, 0)
+    assert(st.tracks[5].machine == m,
+      "machine column " .. (7 + m) .. " chose " .. st.tracks[5].machine)
+  end
+  G.g.key(15, 5, 1); G.g.key(15, 5, 0)
   assert(st.tracks[5].mute == true, "mute failed")
-  G.g.key(14, 5, 1); G.g.key(14, 5, 0)
+  G.g.key(15, 5, 1); G.g.key(15, 5, 0)
+  G.g.key(16, 1, 1); G.g.key(16, 1, 0)
+  assert(st.playing, "grid transport did not start")
+  G.g.key(16, 1, 1); G.g.key(16, 1, 0)
   st.mode = "page"
+  st.select_track(1)
 end)
 
 check("transport runs every sequencer", function()
   local st = state
-  for i = 1, 8 do st.tracks[i]:set_machine(((i - 1) % 3) + 1) end
+  for i = 1, 8 do st.tracks[i]:set_machine(((i - 1) % NM) + 1) end
   st.start()
   -- pump the clock coroutines the way norns would
   for _ = 1, 200 do

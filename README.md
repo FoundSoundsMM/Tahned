@@ -2,20 +2,35 @@
 
 An FM groovebox for [norns](https://monome.org/norns) and a grid 128.
 
-Eight tracks. Each track runs one of three FM machines, each with its own
-sequencer. Parameters are laid out eight to a page, and every one of them can
-be locked to a single step.
+Eight tracks. Each track runs one of six FM machines — five drums and a
+polyphonic voice — each with its own sequencer. Parameters are laid out eight
+to a page, and every one of them can be locked to a single step.
 
 > **Install the folder as `tahned`** (lowercase) in `~/dust/code/`. The
 > `include()` paths depend on it.
 
 ## Machines
 
+Five of them are drums. A drum is one sound, not a synth with a page of
+envelopes bolted to a page of operators, so each gets **one page of eight
+controls** — the eight that move that particular drum around inside its own
+family. Nothing is shared between them but the channel range: KICK's FM is not
+HAT's FM, and each is free to spend its eight where that family needs them.
+All five are one-shot, sine FM, and latch everything at the trigger, so their
+parameter locks are exact.
+
 | | |
 |---|---|
-| **PERC** | Three-operator FM percussion. Pitch sweep, wavefolding on the body, a noise section and a transient. Each modulator keeps its own ratio and its own amount; they share one decay and one end level. One-shot voices. **Defaults are an 808 kick.** |
-| **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two ADSR envelopes, either of which can cycle. Every parameter is read live, so a note already sounding follows what you turn. Sixteen voices a track, oldest-first stealing. |
-| **AMB** | A drone rather than a note player: six detuned FM partials that keep sounding, with eight trigger lanes the sequencer uses to cut rhythm and movement into the texture. |
+| **KICK** | Sine body, pitch drop, one modulator, a click on top. `TUNE SWEEP S.TIME DECAY FM RATIO CLICK PUNCH`. **Defaults are an 808 kick** at 49 Hz. |
+| **SNARE** | Two FM tones a fifth-and-a-bit apart for the shell, filtered noise for the wires, `SNAP` between them. `TUNE SNAP FM RATIO B.DEC N.DEC N.TONE CRACK` |
+| **HAT** | Six partials cross-modulated by a seventh through a resonant high band — the 808's oscillator cluster done in FM. `TUNE SPREAD FM DECAY TONE RES NOISE OPEN` |
+| **TOM** | A kick that keeps its pitch: shallower, slower bend, a skin transient, and `WOOD` ringing a shell around it. `TUNE BEND B.TIME DECAY FM RATIO SKIN WOOD` |
+| **CYMB** | The hat's cluster taken long and dense, with `SWELL` running the attack backwards for a reverse crash. `TUNE SPREAD FM DECAY TONE SIZZLE SWELL DIRT` |
+| **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two ADSR envelopes, either of which can cycle, and the mod EG has **two destinations**. Every parameter is read live, so a note already sounding follows what you turn. Sixteen voices a track, oldest-first stealing. |
+
+`SPREAD` on HAT and CYMB is the one control that decides whether a cluster is a
+bell or a cymbal: it walks the six or eight partials off the harmonic series
+and onto an inharmonic set, and everything between the two is available.
 
 Switching machine is non-destructive — each track keeps a slot per machine, so
 its sound, sequencer settings and pattern are still there when you switch back.
@@ -24,13 +39,15 @@ its sound, sequencer settings and pattern are still there when you switch back.
 
 Every track has, in order:
 
-1. **MASTER** — machine, level, pan, drive, three sends, width
-2. **SEQ** — length, speed, swing, direction, rotate, probability, and two more
-   depending on the machine (TONE also gets a **HARMONY** page)
-3. **the machine's own pages** — three for PERC and AMB, four for TONE
+1. **MIX** — machine, level, pan, drive, three sends, width
+2. **SEQ** — length, speed, swing, direction, rotate, probability, ratchet and
+   gate (TONE also gets a **HARMONY** page)
+3. **the machine's own pages** — one for each drum, four for TONE
 4. **FILTER** — type (LP / BP / HP / comb), cutoff, res, envelope, keytrack, drive
-5. **COLOUR** — crush, tape wow, saturation, compression
-6. **LFO 1–4** — speed, multiplier, wave, mode, and **two destinations each**
+5. **LFO 1–4** — speed, multiplier, wave, mode, and **two destinations each**
+
+which is eight pages for a drum and twelve for TONE. COLOUR is not among them
+any more: it is one chain on the master rather than eight of them a track deep.
 
 Labels are capped at six characters, which is what fits in a 32px cell
 without running into the section beside it. `tools/check-lua.lua` fails if a
@@ -38,21 +55,19 @@ longer one is ever added.
 
 ### Macros
 
-A control that only ever moved with another one is not two controls. PERC
-went from thirty-two parameters over four pages to twenty-four over three,
-and COLOUR from eight to five, by pooling the pairs that were never set
-apart:
+A control that only ever moved with another one is not two controls. Each
+drum fits its whole voice into eight, and TONE's two loop switches became one,
+by pooling the pairs that were never set apart:
 
 | | |
 |---|---|
-| **M.DEC** / **M.END** | one decay and one end level for both of PERC's modulator envelopes, B kept tighter and lower than A |
-| **N.DEC** | the noise envelope: its hold grows with its decay |
-| **N.TONE** | the noise's character on one bipolar control — dark, coarse and grainy to the left, fine bright hiss to the right |
-| **PHASE** | a locked start phase also locks the noise, so a hit set that way is identical every time |
-| **BLIP** (AMB) | level and FM index together: a louder blip is a brighter one |
-| **DEPTH** (AMB) | motion depth carries the amplitude wobble with it |
+| **PUNCH** (KICK) | drives the body and tightens its front together: a kick that is harder is also a kick that is shorter |
+| **N.TONE** (SNARE) | the wires' colour and their bandwidth on one bipolar control — dark and narrow to the left, bright and open to the right |
+| **OPEN** (HAT) | stretches the decay and opens a tail behind it, which is the whole of the difference between a tick and a wash |
+| **CYCLE** (TONE) | one switch over both envelopes — `OFF AMP MOD BOTH` — instead of a loop switch on each; the cell it frees is where the mod EG's second destination went |
 | **CRUSH** | bit depth and sample rate walked down together |
 | **COMP** | ratio, attack and wet mix on one control |
+| **TONE** (drive) | tilts what goes *into* the master drive rather than what comes out, and is scaled by DRIVE so the stage is transparent with the drive down |
 
 There are no curve controls. Attacks are convex and decays and releases are
 exponential, which is where the curve controls were always being left. The
@@ -65,8 +80,8 @@ Every TONE parameter is read live off the control bus, so turning a ratio, an
 algorithm or a waveform while a note is held is heard on that note. The
 trade-off is at the other end: a parameter lock is heard for as long as its
 step is current, rather than being captured for the whole of a note that
-outlives the step. PERC is one-shot and latches everything at the trigger, so
-its locks are exact.
+outlives the step. The drums are one-shot and latch everything at the trigger,
+so their locks are exact.
 
 Filter type picks between four separately compiled synthdefs rather than
 switching at runtime, so the three filters you are not using cost nothing.
@@ -83,20 +98,35 @@ switching at runtime, so the three filters you are not using cost nothing.
 | K2 + K3 | master |
 | K1 + E2 | jump pages |
 | K1 + E3 | coarse |
+| K1 + K3 | play / stop |
+| K1 + K2 | reset every track to the top of its pattern |
 
 ### Master
 
-K2+K3 is the master page: the eight tracks with their patterns, transport,
-and the three sends. E1 picks a track, E2 walks the master parameters, K1+E2
-jumps between **CLOCK**, **CHORUS**, **DELAY** and **REVERB**, and E3 turns
-whatever is under the cursor. The clock comes first, so E3 still lands on the
-tempo the moment you get there. These are the same norns params that live in
-the menu and save with the PSET — reaching for the menu to set a delay time
-in the middle of a take is not a thing anybody wants to do.
+K2+K3 opens a page set of its own, walked by the same two keys: **K3
+advances, K2 goes back**, and neither wraps. E1 still picks a track, E2 moves
+the cursor inside the page, E3 turns what is under it, and K1+E2 jumps a whole
+page.
 
-On the grid, columns 1–8 pick the track, 10–12 set its machine, 14 mutes it,
-and column 16 rows 1–2 are play/stop and reset. K3 also toggles play.
-Selecting a track returns you to the page you last had open on it.
+| | |
+|---|---|
+| 1 **OVER** | the eight tracks with their machine, their mute and the pattern each one is playing, its playhead walking |
+| 2 **PERFORM** | eight offsets that land on every voice on every track at once — `PITCH ATTACK DECAY TIMBRE CUTOFF RES FOLD DRIVE`. Centre is no change, so the page is safe to leave where it is |
+| 3 **MIX** | the eight track levels as faders. It is the same channel each track's own MIX page turns |
+| 4 **COLOUR** | `CRUSH WOW W.RATE SATURN TILT LOSS GLITCH COMP` |
+| 5 **SEND FX** | two controls each for the reverb, the delay, the chorus and the master drive |
+| 6 **CLOCK** | tempo |
+| 7–9 | chorus, delay and reverb in full |
+
+Everything from PERFORM on is a norns param, so it saves with the PSET and
+sits in the menu too — but reaching for the menu to set a delay time in the
+middle of a take is not a thing anybody wants to do. SEND FX is a shortcut
+rather than a fourth copy: turning `R.SIZE` there and turning `SIZE` on the
+reverb page are the same act.
+
+On the grid, columns 1–6 pick the track, 8–13 set its machine, 15 mutes it,
+and column 16 rows 1–2 are play/stop and reset. Selecting a track returns you
+to the page you last had open on it.
 
 ### Parameter locks
 
@@ -105,7 +135,7 @@ that step. **Hold several and the lock lands on all of them**, so a handful
 of steps can be shaped in one gesture. A locked value is flagged on screen,
 the header counts the pads down, and the lock reverts when the step passes.
 Sequencer settings that mean something on a single step — probability,
-ratchet, gate, density — lock the same way. While steps are held, **E1** sets
+ratchet, gate — lock the same way. While steps are held, **E1** sets
 their velocity, and on TONE the keyboard writes notes onto all of them.
 
 Writing a lock never pushes it at the engine. The track keeps its own value
@@ -119,16 +149,18 @@ A quick press toggles a step; a hold is a lock gesture and leaves it alone.
 
 What the 16×8 shows depends on the selected track's machine:
 
-- **PERC** — all eight rows are steps, sixteen to a row, up to 128
+- **the drums** — all eight rows are steps, sixteen to a row, up to 128
 - **TONE** — rows 1–4 are 64 steps, rows 5–8 an isomorphic keyboard (a scale
   degree per column, a third per row). Hold a step and play the keyboard to
   write notes onto it; play it with no step held to audition.
-- **AMB** — the eight rows are the drone's eight trigger lanes (blip, gate,
-  swell, shift, filter, shimmer, stutter, fold), sixteen steps each. Every lane
-  has its own length and speed, so lanes drift against each other.
 
 Playhead is full brightness, written steps scale with velocity, and every
 fourth step stays faintly lit so the bars are readable.
+
+**ROTATE** is a read-time offset, never a rewrite, so turning it back puts
+everything where it was. The grid and the screen look through the same
+offset, so the pattern visibly slides under a playhead that keeps walking
+left to right, and a pad always edits the step it is drawing.
 
 ### Leader and follower
 
@@ -141,13 +173,32 @@ currently sounding (`VOICE`), or play the leader's root in its own register
 ## Effects
 
 Three sends — chorus, delay, and a reverb with pitch-shifted feedback for
-shimmer — live in the norns params menu, along with a per-track colour chain of
-bit and rate reduction, tape wow and flutter, saturation and compression.
+shimmer — plus one **colour chain across the whole mix**, the sends included.
 
 On the reverb, **SIZE** sets the tail on its own and **SHIM FBK** regenerates
 only the pitch-shifted path. They are deliberately not the same control: a
 broadband loop around a reverb that already has its own decay multiplies the
 two into a runaway rather than lengthening the tail.
+
+### Colour
+
+It used to be a chain per track, five controls deep, eight of them running at
+once. It is one chain now, at the end of everything, with eight:
+
+| | |
+|---|---|
+| **CRUSH** | bit depth and sample rate walked down together |
+| **WOW** / **W.RATE** | tape wow and flutter |
+| **SATURN** | tape saturation, and the top end it costs |
+| **TILT** | one control pivoting the spectrum about 1k, the way a DJ isolator does — lows up and highs down, or the other way |
+| **LOSS** | a codec rather than a filter. Dropping the quiet bins is what an mp3 actually does, and it is what makes the artefact recognisable: the survivors smear into the holes the discarded ones leave. The threshold is taken against a level-tracked copy, not against raw magnitudes — an absolute one is a gate, wiping a quiet passage and leaving a loud one alone, which is the opposite of what a codec does |
+| **GLITCH** | keeps a rolling half second of the mix and, at random, stops reading live and loops a slice of it instead, with the odd hole punched through. The buffer is always recording, so a glitch is always of something that was really just played |
+| **COMP** | ratio, attack and wet mix on one control |
+
+The order is the order damage happens in on real gear — drive, quantise,
+wobble, saturate, tilt, throw information away, break it, and only then ask
+something to hold the level. **DRIVE** and its **TONE** are the head of the
+same chain, but they belong to the SEND FX page rather than to COLOUR.
 
 ## How the engine is wired
 
@@ -156,13 +207,23 @@ One SuperCollider engine drives all eight tracks. Each track owns a
 lock is just `(channel, value)` and nothing needs a special path:
 
 ```
-ch  0..7   master   level pan drive sendCho sendDly sendRev width
-ch  8..39  syn1..4  machine specific
+ch  0..7   mix      level pan drive sendCho sendDly sendRev width
+ch  8..39  syn      machine specific -- each synthdef carries its own map
+                    the drums use 8..15, TONE 8..38
 ch 40..47  filter
-ch 48..55  colour
+ch 48..55  spare -- COLOUR used to live here
 ch 56..87  lfo1..4  spd mult wave mode, destA depA destB depB
 ch 88..95  spare -- 88 is the LFO null destination
 ```
+
+One more bus is global rather than per track: eight channels of PERFORM
+offset, read by every voice on every track alongside its own parameters. Each
+is −1..1 and does nothing at 0, so the page can be left wherever it is.
+
+Bipolar controls run −63..63 rather than −64..63, so their centre normalises
+to exactly 0.5 and a control sitting at zero reaches the engine as nothing.
+Off by one step it is inaudible on most of them; on DETUNE it was a six
+second beat between carrier and modulator on every held note.
 
 A track holds at most sixteen tone voices at once. A voice keeps its slot
 until the server reports the node freed, not when the note is released, because
@@ -198,18 +259,23 @@ lua tools/check-lua.lua
 ```
 
 Stubs the norns API and actually runs the script: init, a redraw of every page
-of every machine, page navigation, encoder edits, grid presses, parameter
-locking, a run of all three sequencer types, and a save/load round trip. Its
-`include()` deliberately does not cache, matching norns, so module-identity
-mistakes surface here too.
+of every machine and every master page, page navigation in both, encoder
+edits, grid presses, parameter locking, a run of both sequencer types, and a
+save/load round trip. Its `include()` deliberately does not cache, matching
+norns, so module-identity mistakes surface here too.
 
 ```bash
 ./tools/check-fx.sh
 ```
 
-Renders each send effect offline through `scsynth -N` — one second of noise
-then silence, at the most extreme settings the params allow — and checks the
+Renders each effect offline through `scsynth -N` — one second of noise then
+silence, at the most extreme settings the params allow — and checks the
 feedback loops decay, stay under full scale, and still leave a usable tail.
+The master colour chain goes through twice: once at its extreme, where it
+still has to make a sound rather than silence, and once at rest, where the
+whole mix passes through it and it has to be transparent. That half is fed
+four sines rather than noise, because noise is a different signal on every
+render and the levels move by a third between runs.
 
 ```bash
 ./tools/check-choke.sh
@@ -220,18 +286,35 @@ voice-stealing choke: silent within milliseconds of being stolen, and still
 sounding when it is not.
 
 ```bash
+./tools/check-voice.sh
+```
+
+Renders all five drums and TONE offline and measures them. The control bus is
+filled by `tools/dump-defaults.lua`, which runs the script and captures what
+it actually sends, so the check is against the defaults that ship rather than
+numbers copied into a test. Every drum has to sound, stay under full scale,
+put its energy where that drum lives and stop when it should — a kit whose hat
+rings for two seconds is not a kit. KICK is held to the 808: 49 Hz, gone by
+about six tenths. It also asks whether SWEEP bends the pitch at all, and
+whether a held TONE note follows a ratio turned under it. A control that looks
+like a control and does nothing is exactly what this exists to catch.
+
+```bash
 lua tools/render-screen.lua preview   # then open preview/index.html
 ```
 
 Implements the norns screen API as an SVG writer and runs the script's own
-drawing code, so every page can be looked at without hardware.
+drawing code, so every page can be looked at without hardware. The contact
+sheet is rebuilt from the same draws, so it cannot go stale.
 
 ## Not done yet
 
-- Never run on hardware. Nothing here has made a sound outside an offline
-  SynthDef build.
+- Never run on hardware. Everything here has been rendered offline and
+  measured, never played.
+- Pattern data from before the channel map moved will not load; the version
+  in the file is checked and a mismatch is refused rather than read wrong.
 - Per-step micro-timing is not implemented.
-- Amb lanes are fixed at 16 steps; per-lane speed carries the polyrhythm
-  instead of longer lanes.
+- The drums have no ALGO: each one's routing is fixed, chosen for that drum.
+  Eight controls is the budget and a routing switch is not the best use of one.
 - Copy, paste and pattern chaining.
 - MIDI in and out.

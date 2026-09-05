@@ -1,21 +1,21 @@
 -- state.lua -- tracks, selection, transport
 local Track = include("tahned/lib/core/track")
+local I     = include("tahned/lib/instruments/init")
 local M     = include("tahned/lib/core/master")
 
 local state = {}
 
 state.tracks  = {}
 state.sel     = 1
-state.mode    = "page"    -- "page" | "select"
+state.mode    = "page"    -- "page" | "master"
 state.cursor  = 1         -- which of the eight cells is being edited
 state.shift   = false
 state.k2, state.k3 = false, false
 state.playing = false
 state.held    = {}        -- grid pads currently held, for step editing
 state.lock_step = nil     -- step being parameter-locked, if any
-state.lock_lane = 1
 state.lock_pad  = nil     -- where that step is drawn, which ROTATE can move
-state.mgroup  = 1         -- master fx group / parameter under E2 in select mode
+state.mpage   = 1         -- master page, and the cell E2 is on inside it
 state.mcursor = 1
 state.dirty   = true
 
@@ -25,7 +25,7 @@ function state.init()
   -- leader; kept per instance because include() gives each caller its own
   -- copy of the module table
   for _, t in ipairs(state.tracks) do
-    for m = 1, 3 do t.slot[m].seq.tracks = state.tracks end
+    for m = 1, I.n do t.slot[m].seq.tracks = state.tracks end
   end
 end
 
@@ -69,36 +69,47 @@ function state.lock_count()
   return n
 end
 
--- ------------------------------------------------------------- master fx
+-- ---------------------------------------------------------------- master
+--
+-- Its own page set, walked by K2 and K3 the same way a track's pages are.
 
-function state.master_group() return M.group(state.mgroup) end
+function state.master_page() return M.page(state.mpage) end
 
-function state.master_param()
-  return M.param(state.mgroup, state.mcursor)
+function state.master_param() return M.param(state.mpage, state.mcursor) end
+
+function state.set_master_page(p)
+  state.mpage = util.clamp(p, 1, #M.pages)
+  state.mcursor = util.clamp(state.mcursor, 1, M.page_cells(state.mpage))
+  state.dirty = true
 end
+
+function state.master_page_fwd()  state.set_master_page(state.mpage + 1) end
+function state.master_page_back() state.set_master_page(state.mpage - 1) end
 
 function state.master_move(d)
-  local g = state.master_group()
-  state.mcursor = util.clamp(state.mcursor + d, 1, #g.p)
+  state.mcursor = util.clamp(state.mcursor + d, 1, M.page_cells(state.mpage))
   state.dirty = true
 end
 
-function state.master_group_move(d)
-  state.mgroup = util.clamp(state.mgroup + d, 1, #M.groups)
-  state.mcursor = 1
-  state.dirty = true
-end
-
+-- E3 turns whatever the cursor is on: a norns param on a params page, and
+-- the track's own level on MIX, which is the same channel its MIX page has
 function state.master_edit(d)
-  local sp = state.master_param()
-  if sp then params:delta(sp.id, d) end
+  local pg = state.master_page()
+  if pg.kind == "mix" then
+    local t = state.tracks[util.clamp(state.mcursor, 1, 8)]
+    local sp = t.chspec[0]
+    if sp then t:delta(sp, d) end
+  else
+    local e = state.master_param()
+    if e then params:delta(e.param, d) end
+  end
   state.dirty = true
 end
 
 -- value locked to the step currently being held, if any
 function state.lock_value(sp)
   if not state.lock_step or not sp then return nil end
-  local step = state.seq():get_step(state.lock_step, state.lock_lane)
+  local step = state.seq():get_step(state.lock_step)
   if not step then return nil end
   if sp.k == "seq" then return step[sp.id] end
   return sp.ch and step.lock and step.lock[sp.ch]
@@ -107,7 +118,7 @@ end
 -- velocity of the step being held, for the header readout
 function state.lock_vel()
   if not state.lock_step then return nil end
-  local step = state.seq():get_step(state.lock_step, state.lock_lane)
+  local step = state.seq():get_step(state.lock_step)
   return step and step.vel
 end
 
@@ -141,7 +152,6 @@ function state.reset()
   for _, t in ipairs(state.tracks) do
     local s = t:seq()
     s.pos, s.last = 0, 0
-    if s.lane then for l = 1, 8 do s.lane[l].pos, s.lane[l].last = 0, 0 end end
   end
 end
 

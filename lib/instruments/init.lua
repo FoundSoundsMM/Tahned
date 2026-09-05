@@ -1,22 +1,25 @@
 -- instrument registry
-local perc = include("tahned/lib/instruments/perc")
-local tone = include("tahned/lib/instruments/tone")
-local amb  = include("tahned/lib/instruments/amb")
-local C    = include("tahned/lib/instruments/common")
+local drums = include("tahned/lib/instruments/drums")
+local tone  = include("tahned/lib/instruments/tone")
+local C     = include("tahned/lib/instruments/common")
 
-local I = { perc, tone, amb }
-I.by_id = { perc = perc, tone = tone, amb = amb }
+local I = {}
+for _, d in ipairs(drums) do table.insert(I, d) end
+table.insert(I, tone)
+
+I.by_id = {}
+for _, inst in ipairs(I) do I.by_id[inst.id] = inst end
 I.common = C
+I.n = #I
 
 -- Full ordered page list for a machine:
---   MASTER, SEQ..., instrument pages, FILTER, COLOUR, LFO 1..4
+--   MIX, SEQ..., the machine's own pages, FILTER, LFO 1..4
 function I.pages_for(m)
   local inst = I[m]
-  local pages = { C.master }
+  local pages = { C.mix }
   for _, p in ipairs(C.seqpage[inst.seq]) do table.insert(pages, p) end
   for _, p in ipairs(inst.pages) do table.insert(pages, p) end
   table.insert(pages, C.filter)
-  table.insert(pages, C.colour)
   for n = 1, 4 do table.insert(pages, C.lfo[n]) end
   return pages
 end

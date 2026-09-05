@@ -1,12 +1,10 @@
 -- sequencer.lua
 --
--- One sequencer per (track, machine) slot. Three behaviours share the step
+-- One sequencer per (track, machine) slot. Two behaviours share the step
 -- store, direction logic, probability and parameter locks:
 --
---   perc  up to 128 steps, ratchets, per-step note offset
+--   drum  up to 128 steps, ratchets, per-step note offset
 --   tone  up to 64 steps holding chords, with leader/follower harmony
---   amb   eight independent lanes of 16 steps, each with its own length and
---         speed, firing the drone's trigger lanes rather than notes
 --
 -- A step is sparse -- nil means empty. Anything the step does not override
 -- falls back to the track's sequencer settings.
@@ -17,7 +15,7 @@ local musicutil = require "musicutil"
 local Seq = {}
 Seq.__index = Seq
 
-local MAXLEN = { perc = 128, tone = 64, amb = 16 }
+local MAXLEN = { drum = 128, tone = 64 }
 
 -- ---------------------------------------------------------------- creation
 
@@ -37,34 +35,13 @@ function Seq.new(track, kind, m)
   o.held = {}          -- voice id -> true, for tone
   o.clocks = {}
   o.tracks = nil        -- filled in by state.init
-  if kind == "amb" then
-    o.lane = {}
-    for l = 1, 8 do
-      o.lane[l] = { steps = {}, pos = 0, last = 0, fwd = true, length = 16, speed = 5 }
-    end
-  end
   return o
 end
 
--- LENGTH and SPEED are per lane on amb, everything else is per track
-local function lane_scoped(id) return id == "length" or id == "speed" end
-
-function Seq:cur_lane() return util.clamp(self.s.lane or 1, 1, 8) end
-
-function Seq:get(sp)
-  if self.kind == "amb" and lane_scoped(sp.id) then
-    return self.lane[self:cur_lane()][sp.id]
-  end
-  return self.s[sp.id]
-end
+function Seq:get(sp) return self.s[sp.id] end
 
 function Seq:set(sp, v)
-  v = util.clamp(v, sp.min, sp.max)
-  if self.kind == "amb" and lane_scoped(sp.id) then
-    self.lane[self:cur_lane()][sp.id] = v
-  else
-    self.s[sp.id] = v
-  end
+  self.s[sp.id] = util.clamp(v, sp.min, sp.max)
 end
 
 function Seq:length() return util.clamp(self.s.length or 16, 1, self.maxlen) end
@@ -74,14 +51,13 @@ end
 
 -- ------------------------------------------------------------------- steps
 
-function Seq:store(lane) return (self.kind == "amb") and self.lane[lane].steps or self.steps end
+function Seq:store() return self.steps end
 
-function Seq:get_step(i, lane) return self:store(lane or 1)[i] end
+function Seq:get_step(i) return self.steps[i] end
 
-function Seq:toggle(i, lane)
-  local st = self:store(lane or 1)
-  if st[i] then st[i] = nil else st[i] = self:blank() end
-  return st[i]
+function Seq:toggle(i)
+  if self.steps[i] then self.steps[i] = nil else self.steps[i] = self:blank() end
+  return self.steps[i]
 end
 
 function Seq:blank()
@@ -91,18 +67,12 @@ function Seq:blank()
   return { on = true, vel = 100, lock = {} }
 end
 
-function Seq:ensure(i, lane)
-  local st = self:store(lane or 1)
-  if not st[i] then st[i] = self:blank() end
-  return st[i]
+function Seq:ensure(i)
+  if not self.steps[i] then self.steps[i] = self:blank() end
+  return self.steps[i]
 end
 
-function Seq:clear()
-  self.steps = {}
-  if self.kind == "amb" then
-    for l = 1, 8 do self.lane[l].steps = {} end
-  end
-end
+function Seq:clear() self.steps = {} end
 
 -- ------------------------------------------------------------- parameter locks
 --
@@ -127,7 +97,8 @@ end
 
 -- --------------------------------------------------------------- direction
 
--- `r` carries the walk state so lanes and tracks can use the same logic
+-- `r` carries the walk state rather than reading it off self, so the walk
+-- can be driven for a step that is not the sequencer's current one
 function Seq:advance(r, len)
   local dir = self.s.dir or 0
   if r.pos == 0 then
@@ -163,22 +134,13 @@ function Seq:read_index(pos, len)
   return ((pos - 1 + rot) % len) + 1
 end
 
--- length of the run a display position walks: the lane's on amb, the
--- sequencer's otherwise
-function Seq:disp_len(lane)
-  if self.kind == "amb" then
-    return util.clamp(self.lane[lane or 1].length, 1, 16)
-  end
-  return self:length()
-end
-
 -- grid/screen position -> stored step index
-function Seq:disp(i, lane)
-  return self:read_index(i, self:disp_len(lane))
+function Seq:disp(i)
+  return self:read_index(i, self:length())
 end
 
-function Seq:disp_step(i, lane)
-  return self:store(lane or 1)[self:disp(i, lane)]
+function Seq:disp_step(i)
+  return self.steps[self:disp(i)]
 end
 
 function Seq:chance(st)
@@ -190,15 +152,7 @@ end
 
 function Seq:start()
   self:stop()
-  if self.kind == "amb" then
-    -- one clock per lane: the lanes have independent lengths and speeds, so
-    -- there is no shared grid to ride
-    for l = 1, 8 do
-      self.clocks[l] = clock.run(function() self:lane_loop(l) end)
-    end
-  else
-    self.clocks[1] = clock.run(function() self:loop() end)
-  end
+  self.clocks[1] = clock.run(function() self:loop() end)
 end
 
 function Seq:stop()
@@ -209,9 +163,6 @@ function Seq:stop()
   self:all_off()
   self:release_locks()
   self.pos, self.last = 0, 0
-  if self.kind == "amb" then
-    for l = 1, 8 do self.lane[l].pos, self.lane[l].last = 0, 0 end
-  end
 end
 
 function Seq:swing_delay(pos, beats)
@@ -230,20 +181,6 @@ function Seq:loop()
     if d > 0 then clock.sleep(clock.get_beat_sec() * d) end
     self.last = self:read_index(pos, len)
     self:fire(self.last, beats)
-  end
-end
-
-function Seq:lane_loop(l)
-  local ln = self.lane[l]
-  while true do
-    local beats = self:step_beats(ln.speed)
-    clock.sync(beats)
-    local len = util.clamp(ln.length, 1, 16)
-    local pos = self:advance(ln, len)
-    local d = self:swing_delay(pos, beats)
-    if d > 0 then clock.sleep(clock.get_beat_sec() * d) end
-    ln.last = self:read_index(pos, len)
-    self:fire_lane(l, ln.last)
   end
 end
 
@@ -366,7 +303,7 @@ function Seq:fire(i, beats)
   if not (st and st.on) then return end
   if not self:chance(st) then return end
 
-  if self.kind == "perc" then
+  if self.kind == "drum" then
     local vel = (st.vel or 100) / 127
     local note = 36 + (st.note or 0)
     local r = st.ratchet or self.s.ratchet or 1
@@ -403,29 +340,6 @@ function Seq:fire(i, beats)
   end
 end
 
-function Seq:fire_lane(l, i)
-  local ln = self.lane[l]
-  local st = ln.steps[i]
-  if not (st and st.on) then return end
-  if not self:chance(st) then return end
-  if math.random(100) > (st.density or self.s.density or 100) then return end
-
-  -- lanes run on independent clocks, so a lock here is momentary: send it,
-  -- then hand the channel back once the lane's step has passed
-  if st.lock and next(st.lock) then
-    local beats = self:step_beats(ln.speed)
-    for ch, v in pairs(st.lock) do self.track:send_lock(ch, v) end
-    local chans = {}
-    for ch in pairs(st.lock) do table.insert(chans, ch) end
-    clock.run(function()
-      clock.sleep(clock.get_beat_sec() * beats)
-      for _, ch in ipairs(chans) do self.track:send_ch(ch) end
-    end)
-  end
-
-  self.track:amb_trig(l, (st.vel or 100) / 127)
-end
-
 function Seq:all_off()
   if self.kind == "tone" then
     for id in pairs(self.held) do self.track:note_off(id) end
@@ -437,9 +351,6 @@ end
 -- What the grid should light. `last` is the stored step that sounded; the
 -- playhead belongs at the *display* position it sounded from, so that under
 -- rotation the pattern slides and the playhead keeps walking left to right.
-function Seq:playhead(lane)
-  if self.kind == "amb" then return self.lane[lane or 1].pos end
-  return self.pos
-end
+function Seq:playhead() return self.pos end
 
 return Seq

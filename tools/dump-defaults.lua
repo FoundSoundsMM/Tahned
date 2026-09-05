@@ -2,10 +2,10 @@
 -- lines, so an offline render can be driven by the defaults that ship
 -- rather than by numbers copied into a test.
 --
---   lua tools/dump-defaults.lua [perc|tone|amb] [ch=value ...]
+--   lua tools/dump-defaults.lua [kick|snare|hat|tom|cymb|tone] [ch=value ...]
 
 local ROOT = (arg[0]:match("(.*)/tools/") or ".")
-local WANT = arg[1] or "perc"
+local WANT = arg[1] or "kick"
 
 local sent = {}
 local S = setmetatable({}, { __index = function() return function() end end })
@@ -21,10 +21,13 @@ end })
 dofile(ROOT .. "/tahned.lua")
 init()
 
-local MACH = { perc = 1, tone = 2, amb = 3 }
 local st = tahned.state
+local machine = 1
+for i, inst in ipairs(tahned.instruments) do
+  if inst.id == WANT then machine = i end
+end
 st.select_track(1)
-st.tracks[1]:set_machine(MACH[WANT] or 1)
+st.tracks[1]:set_machine(machine)
 st.tracks[1]:send_all()
 
 -- overrides, so a check can render one parameter moved off its default

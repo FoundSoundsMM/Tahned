@@ -146,41 +146,35 @@ end
 
 print("rendering " .. OUT)
 
--- PERC  1 MASTER  2 SEQ  3 FM  4 MOD  5 BODY  6 FILTER  7 COLOUR  8.. LFO
-shot("01-perc-fm",    "PERC / FM",      1, 3, 2)
-shot("02-perc-mod",   "PERC / MOD",     1, 4, 2, function(t)
-  dial(t, 4, 2, 70); dial(t, 4, 4, 40)
+-- Drums  1 MIX  2 SEQ  3 SYNTH  4 FILTER  5..8 LFO
+shot("01-kick",       "KICK / SYNTH",   1, 3, 2)
+shot("02-snare",      "SNARE / SYNTH",  2, 3, 2, function(t)
+  dial(t, 3, 3, 70); dial(t, 3, 7, 40)
 end)
-shot("03-perc-body",  "PERC / BODY",    1, 5, 3, function(t)
-  dial(t, 5, 6, 70); dial(t, 5, 8, -40)
+shot("03-hat",        "HAT / SYNTH",    3, 3, 5)
+shot("04-tom",        "TOM / SYNTH",    4, 3, 2)
+shot("05-cymb",       "CYMB / SYNTH",   5, 3, 4)
+shot("06-drum-seq",   "KICK / SEQ",     1, 2, 2)
+shot("07-filter",     "FILTER",         1, 4, 2, function(t)
+  dial(t, 4, 2, 70); dial(t, 4, 3, 60); dial(t, 4, 5, 30)
 end)
-shot("05-perc-seq",   "PERC / SEQ",     1, 2, 2)
-shot("06-filter",     "FILTER",         1, 6, 2, function(t)
-  dial(t, 6, 2, 70); dial(t, 6, 3, 60); dial(t, 6, 5, 30)
-end)
-shot("07-colour",     "COLOUR",         1, 7, 1, function(t)
-  dial(t, 7, 1, 70); dial(t, 7, 2, 50); dial(t, 7, 4, 60); dial(t, 7, 5, 80)
-end)
-shot("08-lfo",        "LFO 1",          1, 8, 5)
+shot("08-lfo",        "LFO 1",          1, 5, 5)
 
--- TONE  1 MASTER 2 SEQ 3 HARMONY 4 ALGO 5 OPS 6 AMP EG 7 MOD EG 8 FILTER ...
-shot("09-tone-algo",  "TONE / ALGO",    2, 4, 1)
-shot("09b-tone-ops",  "TONE / OPS",     2, 5, 2)
-shot("10-tone-ampeg", "TONE / AMP EG",  2, 6, 2)
-shot("10b-tone-modeg","TONE / MOD EG",  2, 7, 4)
-shot("11-tone-harm",  "TONE / HARMONY", 2, 3, 4, function(t)
+-- TONE  1 MIX 2 SEQ 3 HARMONY 4 ALGO 5 OPS 6 AMP EG 7 MOD EG 8 FILTER ...
+shot("09-tone-algo",  "TONE / ALGO",    6, 4, 1)
+shot("09b-tone-ops",  "TONE / OPS",     6, 5, 2)
+shot("10-tone-ampeg", "TONE / AMP EG",  6, 6, 2)
+shot("10b-tone-modeg","TONE / MOD EG",  6, 7, 5, function(t)
+  dial(t, 7, 6, 40); dial(t, 7, 7, 4); dial(t, 7, 8, -30)
+end)
+shot("11-tone-harm",  "TONE / HARMONY", 6, 3, 4, function(t)
   local sq = t:seq()
   sq.s.chord = 11; sq.s.scale = 3; sq.s.invert = 1
 end)
 
--- AMB  1 MASTER  2 SEQ  3 SPECTRUM  4 MOTION  5 LANES  6 FILTER ...
-shot("12-amb-spec",   "AMB / SPECTRUM", 3, 3, 2)
-shot("12b-amb-motion","AMB / MOTION",   3, 4, 5)
-shot("13-amb-lanes",  "AMB / LANES",    3, 5, 1)
-
 -- every algorithm, to check the routing glyph against the engine's tables
 for a = 0, 7 do
-  shot(string.format("20-algo4-%d", a + 1), "TONE / ALGO " .. (a + 1), 2, 4, 1,
+  shot(string.format("20-algo4-%d", a + 1), "TONE / ALGO " .. (a + 1), 6, 4, 1,
     function(t) state.set_page(4); t:set(state.track().pages[4].params[1], a) end)
 end
 
@@ -194,23 +188,39 @@ do
   tahned.grid.g.key(7, 1, 1)
   enc(3, -18)
   S.clear(); redraw()
-  save("14-lock", "PERC / FM  steps 5 and 7 held, TUNE locked on both")
+  save("14-lock", "KICK / SYNTH  steps 5 and 7 held, TUNE locked on both")
   shots[#shots + 1] = { name = "14-lock",
-    title = "PERC / FM  steps 5 and 7 held, TUNE locked on both" }
+    title = "KICK / SYNTH  steps 5 and 7 held, TUNE locked on both" }
   tahned.grid.g.key(7, 1, 0)
   tahned.grid.g.key(5, 1, 0)
 end
 
--- master: track select, transport and the sends
-state.mode = "select"
-state.tracks[2]:set_machine(2)
-state.tracks[3]:set_machine(3)
-state.tracks[4]:set_mute(true)
-state.mgroup, state.mcursor = 4, 3
-S.clear(); redraw()
-save("15-select", "K2+K3  master: tracks, transport and the sends")
-shots[#shots + 1] = { name = "15-select",
-  title = "K2+K3  master: tracks, transport and the sends" }
+-- the master: its own page set, K2+K3 to reach it
+do
+  local names = { "OVER", "PERFORM", "MIX", "COLOUR", "SEND FX",
+                  "CLOCK", "CHORUS", "DELAY", "REVERB" }
+  state.mode = "master"
+  state.tracks[2]:set_machine(2)
+  state.tracks[3]:set_machine(3)
+  state.tracks[4]:set_machine(6)
+  state.tracks[5]:set_machine(5)
+  state.tracks[4]:set_mute(true)
+  -- give the mix page something other than eight identical faders
+  for i, v in ipairs({ 110, 96, 74, 100, 58, 120, 40, 88 }) do
+    local t = state.tracks[i]
+    t:set(t.chspec[0], v)
+  end
+  for pg = 1, #tahned.master.pages do
+    state.set_master_page(pg)
+    state.mcursor = math.min(3, tahned.master.page_cells(pg))
+    S.clear(); redraw()
+    local nm = string.format("30-master-%d", pg)
+    local title = "K2+K3  master " .. pg .. " / " .. names[pg]
+    save(nm, title)
+    shots[#shots + 1] = { name = nm, title = title }
+  end
+  state.mode = "page"
+end
 
 -- contact sheet, rebuilt from the same draws so it can never go stale
 do

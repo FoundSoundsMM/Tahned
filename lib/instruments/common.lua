@@ -1,5 +1,9 @@
 -- common -- the pages every track has regardless of machine, plus the
 -- sequencer page for each sequencer type.
+--
+-- COLOUR is not here any more. It is one chain across the whole mix rather
+-- than eight of them, so it lives on the master (K2+K3) with PERFORM and the
+-- sends; see lib/core/master.lua.
 
 local S = include("tahned/lib/core/spec")
 
@@ -37,20 +41,10 @@ C.ALGO4 = {
   { ops = 4, edges = {{4,1},{3,1},{2,1}},             outs = {1} },
   { ops = 4, edges = {},                              outs = {1,2,3,4} },
 }
--- operators are C, A, B -- indices 1, 2, 3
-C.ALGO3 = {
-  { ops = 3, edges = {{3,2},{2,1}},       outs = {1} },
-  { ops = 3, edges = {{2,1},{3,1}},       outs = {1} },
-  { ops = 3, edges = {{3,2},{3,1}},       outs = {1} },
-  { ops = 3, edges = {{3,2},{2,1},{3,1}}, outs = {1} },
-  { ops = 3, edges = {{3,2},{2,1}},       outs = {1,2} },
-  { ops = 3, edges = {{2,1}},             outs = {1,3} },
-  { ops = 3, edges = {{3,1}},             outs = {1,2} },
-  { ops = 3, edges = {},                  outs = {1,2,3} },
-}
 
-C.master = { name = "MASTER", params = {
-  { k = "mach", name = "MACH", g = "mach", opts = S.MACHINE, min = 0, max = 2, def = 0 },
+C.mix = { name = "MIX", params = {
+  { k = "mach", name = "MACH", g = "mach", opts = S.MACHINE,
+    min = 0, max = #S.MACHINE - 1, def = 0 },
   S.c(0, "LEVEL",  { def = 100 }),
   S.b(1, "PAN",    { def = 0, g = "pan" }),
   S.c(2, "DRIVE",  { def = 0 }),
@@ -72,23 +66,12 @@ C.filter = { name = "FILTER", params = {
   S.c(47, "DRIVE",  { def = 0 }),
 }}
 
--- Five macros rather than eight knobs. CRUSH walks bit depth and sample rate
--- down together, which is the only way either of them was ever turned, and
--- COMP carries ratio, attack and wet mix on one control.
-C.colour = { name = "COLOUR", params = {
-  S.c(48, "CRUSH",  { def = 0, g = "bits" }),
-  S.c(49, "WOW",    { def = 0, g = "wow" }),
-  S.c(50, "W.RATE", { def = 40, g = "lfo" }),
-  S.c(51, "TAPE",   { def = 0, g = "sat" }),
-  S.c(52, "COMP",   { def = 0, g = "comp" }),
-}}
-
 -- four LFOs, two destinations each
 C.lfo = {}
 for n = 1, 4 do
   local b = 56 + ((n - 1) * 8)
   C.lfo[n] = { name = "LFO " .. n, params = {
-    S.i(b,     "SPD", 0, 127, 32, { g = "lfo" }),
+    S.i(b,     "SPD", 0, 127, 32, { g = "rate" }),
     S.e(b + 1, "MULT", S.LFOMULT, { def = 2 }),
     S.e(b + 2, "WAVE", S.LFOWAVE, { g = "lfowave" }),
     S.e(b + 3, "MODE", S.LFOMODE, { def = 1 }),
@@ -118,7 +101,7 @@ end
 
 C.seqpage = {}
 
-C.seqpage.perc = { { name = "SEQ", params = (function()
+C.seqpage.drum = { { name = "SEQ", params = (function()
   local p = shared_seq(128, 16)
   p[7] = S.seq("ratchet", "RATCH", { min = 1, max = 8, def = 1, g = "ratchet" })
   p[8] = S.seq("gate",    "GATE",    { min = 1, max = 100, def = 50, g = "bar" })
@@ -144,13 +127,5 @@ C.seqpage.tone = {
     S.seq("follow", "FOLLOW", { opts = {"OFF","DEGREE","VOICE","BASS"}, def = 1 }),
   }},
 }
-
-C.seqpage.amb = { { name = "SEQ", params = (function()
-  -- length and speed here are per lane; see Seq's lane_scoped
-  local p = shared_seq(16, 16)
-  p[7] = S.seq("lane",    "LANE",    { min = 1, max = 8, def = 1, g = "lane" })
-  p[8] = S.seq("density", "DENS", { min = 0, max = 100, def = 100, g = "bar" })
-  return p
-end)() } }
 
 return C

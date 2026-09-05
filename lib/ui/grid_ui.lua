@@ -2,12 +2,12 @@
 --
 -- What the grid shows depends on the selected track's machine:
 --
---   perc    all eight rows are steps, 16 per row, up to 128
+--   drums   all eight rows are steps, 16 per row, up to 128
 --   tone    rows 1-4 are 64 steps, rows 5-8 an isomorphic keyboard
---   amb     eight rows are the drone's eight trigger lanes, 16 steps each
 --
--- Holding K2+K3 replaces all of it with track select, machine select, mutes
--- and transport.
+-- K2+K3 replaces all of it with track select, machine select, mutes and
+-- transport. Six machines need six columns, so the rows read
+-- 1-6 track, 8-13 machine, 15 mute, 16 transport.
 --
 -- Holding a step pad and turning an encoder writes a parameter lock onto that
 -- step rather than changing the track. A quick press toggles the step. Hold
@@ -37,8 +37,10 @@ end
 
 -- ------------------------------------------------------------- addressing
 
-local function perc_step(x, y) return ((y - 1) * 16) + x end
-local function tone_step(x, y) return ((y - 1) * 16) + x end
+local function grid_step(x, y) return ((y - 1) * 16) + x end
+
+-- master page columns
+local TRK_HI, MACH_LO, MACH_HI, MUTE_X, TRANS_X = 6, 8, 13, 15, 16
 
 -- isomorphic: one scale degree per column, a third per row
 function G.kb_note(sq, x, y)
@@ -107,18 +109,18 @@ function G.redraw()
   if not G.g then return end
   G.g:all(0)
 
-  if st8.mode == "select" then
+  if st8.mode == "master" then
     for i = 1, 8 do
       local t = st8.tracks[i]
       local sel = (i == st8.sel)
-      for x = 1, 8 do G.g:led(x, i, sel and 12 or 3) end
-      for m = 1, 3 do
-        G.g:led(9 + m, i, (t.machine == m) and 14 or 2)
+      for x = 1, TRK_HI do G.g:led(x, i, sel and 12 or 3) end
+      for m = MACH_LO, MACH_HI do
+        G.g:led(m, i, (t.machine == (m - MACH_LO + 1)) and 14 or 2)
       end
-      G.g:led(14, i, t.mute and 12 or 2)
+      G.g:led(MUTE_X, i, t.mute and 12 or 2)
     end
-    G.g:led(16, 1, st8.playing and 15 or 5)
-    G.g:led(16, 2, 4)
+    G.g:led(TRANS_X, 1, st8.playing and 15 or 5)
+    G.g:led(TRANS_X, 2, 4)
     G.g:refresh()
     return
   end
@@ -126,27 +128,11 @@ function G.redraw()
   local t = st8.track()
   local sq = t:seq()
 
-  if sq.kind == "amb" then
-    for l = 1, 8 do
-      local ln = sq.lane[l]
-      local sel = (l == (sq.s.lane or 1))
-      for x = 1, 16 do
-        local s = (x <= ln.length) and sq:disp_step(x, l) or nil
-        local lv
-        if x > ln.length then lv = 0
-        elseif x == ln.pos then lv = 15
-        elseif s and s.on then lv = util.round(util.linlin(0, 127, 5, 12, s.vel or 100))
-        else lv = ((x - 1) % 4 == 0) and (sel and 4 or 2) or (sel and 2 or 1) end
-        if st8.held[l * 100 + x] then lv = 15 end
-        G.g:led(x, l, lv)
-      end
-    end
-
-  elseif sq.kind == "tone" then
+  if sq.kind == "tone" then
     local len = sq:length()
     for y = 1, 4 do
       for x = 1, 16 do
-        local i = tone_step(x, y)
+        local i = grid_step(x, y)
         G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len, st8.held[i]))
       end
     end
@@ -169,7 +155,7 @@ function G.redraw()
     local len = sq:length()
     for y = 1, 8 do
       for x = 1, 16 do
-        local i = perc_step(x, y)
+        local i = grid_step(x, y)
         G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len, st8.held[i]))
       end
     end
@@ -190,7 +176,7 @@ local function focus_newest(st8)
     if not best or h.n > best.n then best = h end
   end
   if best then
-    st8.lock_step, st8.lock_lane, st8.lock_pad = best.idx, best.lane or 1, best.pad
+    st8.lock_step, st8.lock_pad = best.idx, best.pad
   else
     st8.lock_step, st8.lock_pad = nil, nil
   end
@@ -198,13 +184,13 @@ end
 
 -- `pad` is where the finger is, `idx` the step that pad is drawing: under
 -- ROTATE the two differ.
-local function press_step(sq, pad, idx, key, lane)
+local function press_step(sq, pad, idx, key)
   local st8 = G.state
   press_n = press_n + 1
-  local existed = sq:get_step(idx, lane) ~= nil
-  if not existed then sq:ensure(idx, lane) end
+  local existed = sq:get_step(idx) ~= nil
+  if not existed then sq:ensure(idx) end
   st8.held[key] = { t = util.time(), n = press_n, pad = pad, idx = idx,
-                    lane = lane, existed = existed, locked = false }
+                    existed = existed, locked = false }
   focus_newest(st8)
   st8.dirty = true
 end
@@ -216,8 +202,7 @@ local function release_step(sq, key)
   if not h then return end
   -- a quick press on an existing step clears it; a hold was a lock gesture
   if h.existed and not h.locked and (util.time() - h.t) < HOLD_TIME then
-    local store = sq:store(h.lane or 1)
-    store[h.idx] = nil
+    sq:store()[h.idx] = nil
   end
   focus_newest(st8)
   st8.dirty = true
@@ -226,19 +211,19 @@ end
 function G.key(x, y, z)
   local st8 = G.state
 
-  if st8.mode == "select" then
+  if st8.mode == "master" then
     G.kb_panic()
     if z == 1 then
-      if x <= 8 then
+      if x <= TRK_HI then
         st8.select_track(y)
-      elseif x >= 10 and x <= 12 then
-        st8.tracks[y]:set_machine(x - 9)
+      elseif x >= MACH_LO and x <= MACH_HI then
+        st8.tracks[y]:set_machine(x - MACH_LO + 1)
         if y == st8.sel then st8.dirty = true end
-      elseif x == 14 then
+      elseif x == MUTE_X then
         st8.tracks[y]:set_mute(not st8.tracks[y].mute)
-      elseif x == 16 and y == 1 then
+      elseif x == TRANS_X and y == 1 then
         st8.toggle_play()
-      elseif x == 16 and y == 2 then
+      elseif x == TRANS_X and y == 2 then
         st8.reset()
       end
       st8.dirty = true
@@ -249,18 +234,6 @@ function G.key(x, y, z)
   local t = st8.track()
   local sq = t:seq()
 
-  if sq.kind == "amb" then
-    local key = (y * 100) + x
-    if z == 1 then
-      sq.s.lane = y
-      if x > sq.lane[y].length then return end
-      press_step(sq, x, sq:disp(x, y), key, y)
-    else
-      release_step(sq, key)
-    end
-    return
-  end
-
   if sq.kind == "tone" and y >= 5 then
     local key = kb_key(x, y)
     if z == 1 then
@@ -268,7 +241,7 @@ function G.key(x, y, z)
       -- with steps held, the keyboard writes notes onto all of them
       if st8.lock_step then
         for _, h in pairs(st8.held) do
-          local step = sq:ensure(h.idx, h.lane)
+          local step = sq:ensure(h.idx)
           step.notes = step.notes or {}
           local found
           for i, hn in ipairs(step.notes) do if hn == n then found = i end end
@@ -288,7 +261,7 @@ function G.key(x, y, z)
     return
   end
 
-  local pad = perc_step(x, y)
+  local pad = grid_step(x, y)
   if pad > sq.maxlen then return end
   if z == 1 then
     if pad > sq:length() then return end
@@ -302,14 +275,14 @@ end
 
 -- Sequencer settings that mean something on a single step. Length, speed and
 -- direction describe the whole pattern, so they are not among them.
-local STEP_SEQ = { prob = true, ratchet = true, gate = true, density = true }
+local STEP_SEQ = { prob = true, ratchet = true, gate = true }
 
 -- Every step currently held takes the edit, so a handful of pads can be
 -- locked together in one gesture.
 local function held_steps(st8, sq)
   local out = {}
   for _, h in pairs(st8.held) do
-    local step = sq:get_step(h.idx, h.lane)
+    local step = sq:get_step(h.idx)
     if step then out[#out + 1] = { h = h, step = step } end
   end
   return out

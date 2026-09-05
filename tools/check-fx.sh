@@ -31,7 +31,7 @@ postInlineWarnings: false
 CONF
 "$SC" -l "$WORK/conf.yaml" "$ROOT/tools/check-fx.scd" "$WORK" 2>&1 \
   | grep -iE "^wrote|ERROR|Exception" || true
-for n in reverb delay chorus; do
+for n in dry reverb delay chorus colour colourOff; do
   # scsynth segfaults on teardown after writing the file, so judge the render
   # by whether the wav appeared rather than by the exit code
   rm -f "$WORK/fx-$n.wav"
