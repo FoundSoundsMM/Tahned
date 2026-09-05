@@ -40,6 +40,47 @@ function G.kb_note(sq, x, y)
   return arr[util.clamp(idx, 1, #arr)]
 end
 
+-- A pad's pitch depends on the scale, root and octave, so it can change while
+-- the pad is still down. Remember what each pad sounded when it was pressed
+-- and release exactly that, or a scale change mid-press leaves a note hanging.
+-- The voice id follows the pad too: two pads can land on the same pitch.
+
+local function kb_key(x, y) return ((y - 1) * 16) + x end
+
+local function kb_release_entry(st8, key, h)
+  st8.kb_held[key] = nil
+  local c = (st8.playing_notes[h.note] or 1) - 1
+  st8.playing_notes[h.note] = (c > 0) and c or nil
+  if h.track then h.track:note_off(9000 + key) end
+end
+
+local function kb_press(st8, key, note, track)
+  st8.kb_held = st8.kb_held or {}
+  st8.playing_notes = st8.playing_notes or {}
+  -- a press with no matching release (grid glitch, mode change) retires here
+  local prev = st8.kb_held[key]
+  if prev then kb_release_entry(st8, key, prev) end
+  st8.kb_held[key] = { note = note, track = track }
+  st8.playing_notes[note] = (st8.playing_notes[note] or 0) + 1
+end
+
+local function kb_release(st8, key)
+  local h = st8.kb_held and st8.kb_held[key]
+  if not h then return end
+  kb_release_entry(st8, key, h)
+end
+
+-- Leaving the keyboard -- into track select, or onto another machine -- means
+-- the pad-up never arrives at the branch that would release the note, so drop
+-- everything still sounding on the way out.
+function G.kb_panic()
+  local st8 = G.state
+  if not (st8 and st8.kb_held) then return end
+  for key, h in pairs(st8.kb_held) do kb_release_entry(st8, key, h) end
+  st8.kb_held = {}
+  st8.playing_notes = {}
+end
+
 -- ------------------------------------------------------------------ leds
 
 local function step_level(sq, st, idx, head, len, held)
@@ -162,6 +203,7 @@ function G.key(x, y, z)
   local st8 = G.state
 
   if st8.mode == "select" then
+    G.kb_panic()
     if z == 1 then
       if x <= 8 then
         st8.select_track(y)
@@ -195,10 +237,9 @@ function G.key(x, y, z)
   end
 
   if sq.kind == "tone" and y >= 5 then
-    local n = G.kb_note(sq, x, y)
-    st8.playing_notes = st8.playing_notes or {}
+    local key = kb_key(x, y)
     if z == 1 then
-      st8.playing_notes[n] = true
+      local n = G.kb_note(sq, x, y)
       -- with a step held, the keyboard writes notes onto that step
       if st8.lock_step then
         local step = sq:ensure(st8.lock_step)
@@ -209,12 +250,13 @@ function G.key(x, y, z)
         else table.insert(step.notes, n) end
         local h = st8.held[st8.lock_step]
         if h then h.locked = true end
+        kb_press(st8, key, n, nil)
       else
-        t:note_on(9000 + n, n, 0.9)
+        kb_press(st8, key, n, t)
+        t:note_on(9000 + key, n, 0.9)
       end
     else
-      st8.playing_notes[n] = nil
-      if not st8.lock_step then t:note_off(9000 + n) end
+      kb_release(st8, key)
     end
     st8.dirty = true
     return

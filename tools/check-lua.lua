@@ -35,8 +35,28 @@ local draws = 0
 screen = setmetatable({}, { __index = function() return function() draws = draws + 1 end end })
 
 local engine_calls = {}
+
+-- the engine keeps one voice per (track, id) and frees it on noteOff, so the
+-- stub mirrors that: whatever is left here is a note left sounding
+local voices = {}
+local function voice_count()
+  local n = 0
+  for _ in pairs(voices) do n = n + 1 end
+  return n
+end
+
 engine = setmetatable({ name = "" }, { __index = function(_, k)
-  return function(...) engine_calls[k] = (engine_calls[k] or 0) + 1 end
+  return function(...)
+    engine_calls[k] = (engine_calls[k] or 0) + 1
+    local a = { ... }
+    if k == "noteOn" then voices[a[1] .. ":" .. a[2]] = a[3]
+    elseif k == "noteOff" then voices[a[1] .. ":" .. a[2]] = nil
+    elseif k == "allOff" then
+      for id in pairs(voices) do
+        if id:match("^" .. a[1] .. ":") then voices[id] = nil end
+      end
+    end
+  end
 end })
 
 local gled = 0
@@ -223,6 +243,42 @@ check("holding a step and turning E3 writes a parameter lock", function()
   assert(st.lock_step == nil, "lock target not released")
   enc(1, 1)
   assert(st.sel ~= sel0, "E1 did not return to track select")
+end)
+
+check("keyboard notes survive a scale change while held", function()
+  local st = state
+  st.mode = "page"
+  st.select_track(1)
+  st.tracks[1]:set_machine(2)                -- tone
+  local sq = st.seq()
+  st.lock_step = nil
+  local before = voice_count()
+
+  -- hold a keyboard pad, change the scale under it, then let go
+  G.g.key(3, 6, 1)
+  assert(voice_count() == before + 1, "keyboard pad did not sound")
+  sq.s.scale = (sq.s.scale or 1) + 3
+  sq.s.root = ((sq.s.root or 0) + 5) % 12
+  G.g.key(3, 6, 0)
+  assert(voice_count() == before, "note left hanging after a scale change")
+
+  -- two pads can land on the same pitch; releasing one must not cut the other
+  G.g.key(1, 6, 1)
+  G.g.key(4, 7, 1)
+  assert(voice_count() == before + 2, "overlapping pads share a voice")
+  G.g.key(1, 6, 0)
+  assert(voice_count() == before + 1, "releasing one pad cut both")
+  G.g.key(4, 7, 0)
+  assert(voice_count() == before, "second pad left hanging")
+
+  -- and dropping into select mode with a pad down releases it
+  G.g.key(5, 8, 1)
+  assert(voice_count() == before + 1, "keyboard pad did not sound")
+  st.mode = "select"
+  G.g.key(1, 1, 1); G.g.key(1, 1, 0)
+  assert(voice_count() == before, "note left hanging entering select mode")
+  st.mode = "page"
+  st.select_track(1)
 end)
 
 check("select mode grid selects tracks, machines, mutes, transport", function()

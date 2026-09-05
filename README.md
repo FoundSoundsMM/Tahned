@@ -14,7 +14,7 @@ be locked to a single step.
 | | |
 |---|---|
 | **PERC** | Three-operator FM percussion. Pitch sweep, wavefolding on the body, separate noise and transient sections. Each modulator has its own decay envelope with an end level and its own modulation amount. One-shot voices. |
-| **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two function-generator envelopes with curve shaping on attack and release, either of which can cycle. Four voice polyphony. |
+| **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two function-generator envelopes with curve shaping on attack and release, either of which can cycle. Sixteen voices a track, oldest-first stealing. |
 | **AMB** | A drone rather than a note player: six detuned FM partials that keep sounding, with eight trigger lanes the sequencer uses to cut rhythm and movement into the texture. |
 
 Switching machine is non-destructive — each track keeps a slot per machine, so
@@ -111,6 +111,15 @@ ch 56..87  lfo1..4  spd mult wave mode, destA depA destB depB
 ch 88..95  spare -- 88 is the LFO null destination
 ```
 
+A track holds at most sixteen tone voices at once. A voice keeps its slot
+until the server reports the node freed, not when the note is released, because
+a voice with a long release is still a whole 4-operator FM synth — that is
+exactly what makes a chord sequence with a long release run the server out of
+CPU. Over the ceiling, the oldest *releasing* voice is stolen first and only
+then the oldest held one, and a stolen voice is faded out over 15ms rather than
+cut, so stealing does not click. Sixteen is above the largest chord one step
+can resolve to, so the cap only ever eats the tail of an older chord.
+
 Each track has a second, parallel *mod* bus holding LFO offsets only. The LFO
 synth scatters into it using a dynamic-index `Out.kr`, so **any** channel above
 can be a modulation destination without a routing matrix and without a cost per
@@ -118,7 +127,7 @@ destination. Voices read the sum of the two buses.
 
 ## Development
 
-Both checks run on a desktop, with no norns and no running server:
+The checks all run on a desktop, with no norns and no running server:
 
 ```bash
 ./tools/check-engine.sh
@@ -126,6 +135,10 @@ Both checks run on a desktop, with no norns and no running server:
 
 Compiles the engine against the real SuperCollider class library and builds
 every SynthDef graph, which catches UGen-level mistakes syntax checking cannot.
+It then drives the voice allocator with stand-in synths to check the per-track
+voice ceiling: that a chord fits under the cap untouched, that a releasing
+voice keeps its slot until the server reports the node gone, and that stealing
+takes a releasing voice before a held one.
 
 ```bash
 lua tools/check-lua.lua
@@ -144,6 +157,14 @@ mistakes surface here too.
 Renders each send effect offline through `scsynth -N` — one second of noise
 then silence, at the most extreme settings the params allow — and checks the
 feedback loops decay, stay under full scale, and still leave a usable tail.
+
+```bash
+./tools/check-choke.sh
+```
+
+Renders one tone voice offline with a twelve second release and checks the
+voice-stealing choke: silent within milliseconds of being stolen, and still
+sounding when it is not.
 
 ```bash
 lua tools/render-screen.lua preview   # then open preview/index.html

@@ -207,6 +207,7 @@ function key(n, z)
     if state.k2 and state.k3 then
       combo = true
       state.mode = (state.mode == "select") and "page" or "select"
+      G.kb_panic()
       state.dirty = true
     end
     return

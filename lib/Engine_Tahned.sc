@@ -20,6 +20,11 @@ Engine_Tahned : CroneEngine {
 
 	classvar <nTracks = 8;
 	classvar <nCh = 96;
+	// Per-track voice ceiling. A releasing voice still costs a full 4-op FM
+	// synth, so with a long release a chord sequence piles them up until the
+	// server glitches. 16 is above the largest chord one step can resolve to,
+	// so a cap never cuts a chord short -- only the tail of an older one.
+	classvar <maxVoices = 16;
 	classvar <fTypes;          // filter variants compiled into each voice
 
 	var <pBus;                 // Array[nTracks] of 64ch control Bus
@@ -28,7 +33,10 @@ Engine_Tahned : CroneEngine {
 	var <fxGroup, <outGroup;
 	var <choBus, <dlyBus, <revBus;
 	var <strip, <fx;
-	var <voices;               // Array[nTracks] of IdentityDictionary(id -> Synth)
+	var <voices;               // Array[nTracks] of IdentityDictionary(id -> entry)
+	var <live;                 // Array[nTracks] of Array of entry, oldest first
+	                           // entry: (syn: Synth, id: Integer, held: Boolean)
+	                           // holds releasing voices too, which is the point
 	var <drone;                // Array[nTracks] of Synth or nil (amb)
 	var <machine;              // Array[nTracks] of Integer  0 perc 1 tone 2 amb
 	var <ftype;                // Array[nTracks] of Integer  cached filter variant
@@ -137,7 +145,7 @@ Engine_Tahned : CroneEngine {
 
 		machine = Array.fill(nTracks, { 0 });
 		ftype   = Array.fill(nTracks, { 0 });
-		voices  = Array.fill(nTracks, { IdentityDictionary.new });
+		this.initVoices;
 		drone   = Array.newClear(nTracks);
 
 		// one second of noise, so NOISE RESET can make a hit sound identical
@@ -309,7 +317,8 @@ Engine_Tahned : CroneEngine {
 
 			// ============================================================ TONE
 			// 4 operator FM, OPL3 waveform set, ASR function generators.
-			SynthDef(("tahned_tone_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0, gate = 1, hz = 220, vel = 1|
+			SynthDef(("tahned_tone_" ++ ft).asSymbol, { |bus = 0, mbus = 0, out = 0, gate = 1, hz = 220, vel = 1,
+				t_choke = 0|
 				var pm = In.kr(bus, nCh) + In.kr(mbus, nCh);
 				var pc = pm.lag(0.015);
 				var pl = Latch.kr(pm, Impulse.kr(0));
@@ -401,6 +410,9 @@ Engine_Tahned : CroneEngine {
 
 				FreeSelf.kr(aLoop * TDelay.kr(1 - gate, aRel + 0.05));
 				sig = sig * ampEg * (1 - velAmp + (velAmp * vel)) * 0.28;
+				// stolen voices fade out here and free themselves, whatever the
+				// amp envelope's own release or loop setting is doing
+				sig = sig * EnvGen.ar(Env([1, 0], [0.015]), t_choke, doneAction: 2);
 				Out.ar(out, Pan2.ar(sig, spread));
 			}).add;
 			// ============================================================= AMB
@@ -690,10 +702,60 @@ Engine_Tahned : CroneEngine {
 		^(kind ++ "_" ++ fTypes[ftype[t].clip(0, 3)]).asSymbol
 	}
 
+	// split out of alloc and freeTrack so the bookkeeping can be exercised
+	// without a server behind it
+	initVoices {
+		voices = Array.newClear(nTracks);
+		live   = Array.newClear(nTracks);
+		nTracks.do { |t| this.clearVoices(t) };
+	}
+
+	clearVoices { arg t;
+		voices[t] = IdentityDictionary.new;
+		live[t]   = Array.new(maxVoices);
+	}
+
 	freeTrack { arg t;
 		vGroup[t].freeAll;
-		voices[t] = IdentityDictionary.new;
+		this.clearVoices(t);
 		drone[t] = nil;
+	}
+
+	// ------------------------------------------------------- voice stealing
+	// `live` is the truth about what is running: a voice leaves it when the
+	// server reports the node gone, not when the note is released.
+
+	forgetVoice { arg t, e;
+		live[t].remove(e);
+		if(voices[t][e.id] === e) { voices[t].removeAt(e.id) };
+	}
+
+	// Choking runs a 15ms fade in the synth and frees it, so stealing does not
+	// click and does not depend on the voice's own release or loop settings.
+	chokeVoice { arg t, e;
+		this.forgetVoice(t, e);
+		e.syn.set(\t_choke, 1);
+	}
+
+	// Take the oldest voice that is already releasing; only if every voice is
+	// still held does the oldest held one go, which is the usual last resort.
+	stealVoice { arg t;
+		var victim = live[t].detect { |e| e.held.not } ?? { live[t].first };
+		victim !? { |e| this.chokeVoice(t, e) };
+	}
+
+	allocVoice { arg t, id, syn;
+		var e = (syn: syn, id: id, held: true);
+		live[t] = live[t].add(e);
+		voices[t][id] = e;
+		syn.onFree { this.forgetVoice(t, e) };
+		while { live[t].size > maxVoices } { this.stealVoice(t) };
+		^e
+	}
+
+	releaseVoice { arg t, e;
+		e.held = false;
+		e.syn.set(\gate, 0);
 	}
 
 	startDrone { arg t;
@@ -743,22 +805,24 @@ Engine_Tahned : CroneEngine {
 		this.addCommand(\noteOn, "iiff", { |msg|
 			var t = msg[1].asInteger.clip(0, nTracks - 1);
 			var id = msg[2].asInteger;
-			voices[t].removeAt(id) !? { |v| v.set(\gate, 0) };
-			voices[t][id] = Synth(this.defFor(t, "tahned_tone"), [
+			// re-triggering a sounding id releases the old voice rather than
+			// orphaning it; it keeps its slot until the server frees it
+			voices[t][id] !? { |e| this.releaseVoice(t, e) };
+			this.allocVoice(t, id, Synth(this.defFor(t, "tahned_tone"), [
 				\bus, pBus[t].index, \mbus, mBus[t].index, \out, tBus[t].index,
 				\hz, msg[3], \vel, msg[4]
-			], vGroup[t]);
+			], vGroup[t]));
 			lfoS[t].set(\t_trig, 1);
 		});
 
 		this.addCommand(\noteOff, "ii", { |msg|
 			var t = msg[1].asInteger.clip(0, nTracks - 1);
-			voices[t].removeAt(msg[2].asInteger) !? { |v| v.set(\gate, 0) };
+			voices[t].removeAt(msg[2].asInteger) !? { |e| this.releaseVoice(t, e) };
 		});
 
 		this.addCommand(\allOff, "i", { |msg|
 			var t = msg[1].asInteger.clip(0, nTracks - 1);
-			voices[t].do { |v| v.set(\gate, 0) };
+			voices[t].do { |e| this.releaseVoice(t, e) };
 			voices[t] = IdentityDictionary.new;
 		});
 
