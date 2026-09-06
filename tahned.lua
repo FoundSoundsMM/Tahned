@@ -31,6 +31,11 @@ local LFO_RATE = 1 / 30
 local function build_params()
   params:add_separator("tahned", "TAHNED")
 
+  -- ROOT and SCALE are not just read when a step is resolved: moving them
+  -- moves the notes already written, so the song is never in two keys at
+  -- once. The master says the key changed, the sequencers own the notes.
+  M.on_key_change = state.rekey
+
   -- PERFORM, COLOUR and the three sends are all built the same way: a group
   -- of controls whose action hands the value to the group's own engine
   -- command. The master pages turn these same params.
@@ -76,11 +81,16 @@ end
 
 -- Bumped when the channel map moves under a machine, since a slot's values
 -- and a step's locks are both keyed by channel and would land on the wrong
--- parameter otherwise.
-local DATA_VERSION = 4
+-- parameter otherwise -- and when the file gains something a reader has to
+-- know about. 5 added the master's own sequencer.
+local DATA_VERSION = 5
 
 function state.serialize()
-  local out = { v = DATA_VERSION, sel = state.sel, tracks = {} }
+  -- the master lane is one sequencer rather than eight, so it saves as one
+  -- entry beside the tracks: its settings and its steps, nothing else
+  local out = { v = DATA_VERSION, sel = state.sel, tracks = {},
+                master = { s = state.mtrack.slot[1].s,
+                           steps = state.mseq.steps } }
   for i, t in ipairs(state.tracks) do
     local e = { machine = t.machine, mute = t.mute, v = t.v, page = t.page, slot = {} }
     for m = 1, I.n do
@@ -119,6 +129,11 @@ function state.deserialize(d)
       t:build_lookup()
       t:send_all()
     end
+  end
+  if d.master then
+    state.mtrack.slot[1].s = d.master.s or state.mtrack.slot[1].s
+    state.mseq.s = state.mtrack.slot[1].s
+    state.mseq.steps = d.master.steps or {}
   end
   state.sel = d.sel or 1
   state.dirty = true
@@ -238,7 +253,10 @@ function enc(n, d)
       if state.shift then state.set_master_page(state.mpage + d)
       else state.master_move(d) end
     else
-      state.master_edit(state.shift and (d * 10) or d)
+      -- with one of the master lane's steps held, the edit lands on the step
+      -- rather than on the master itself
+      local dd = state.shift and (d * 10) or d
+      if not G.try_master_lock(dd) then state.master_edit(dd) end
     end
     state.dirty = true
     return

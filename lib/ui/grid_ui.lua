@@ -5,13 +5,22 @@
 --   drums   all eight rows are steps, 16 per row, up to 128
 --   tone    rows 1-4 are 64 steps, rows 5-8 an isomorphic keyboard
 --
--- K2+K3 replaces all of it with track select, machine select, mutes and
--- transport. Six machines need six columns, so the rows read
--- 1-6 track, 8-13 machine, 15 mute, 16 transport.
+-- K2+K3 opens the master. Its first page, the overview, replaces all of the
+-- grid with track select, machine select, mutes and transport -- six machines
+-- need six columns, so the rows read 1-6 track, 8-13 machine, 15 mute,
+-- 16 transport. Every other master page hands the grid to the master's own
+-- sequencer: eight rows of its steps, locking master parameters the way a
+-- track's steps lock channels.
 --
 -- Holding a step pad and turning an encoder writes a parameter lock onto that
 -- step rather than changing the track. A quick press toggles the step. Hold
 -- several pads and the lock lands on all of them at once.
+--
+-- Holding one pad and *tapping* another is a third thing: a reach. The held
+-- step is given a Metropolis stage long enough to arrive at the pad that was
+-- tapped, so a note sustains across the distance rather than stopping at the
+-- end of its own step. Held is a lock gesture, tapped is a reach, which is
+-- the same distinction a lone pad already makes between a hold and a press.
 --
 -- A lock is never pushed at the engine as it is written: the track keeps its
 -- own value and the change is heard when the locked step comes round, so
@@ -34,6 +43,27 @@ function G.init(state)
   G.state = state
   G.g = grid.connect()
   G.g.key = function(x, y, z) G.key(x, y, z) end
+end
+
+-- The sequencer the pads are addressing: the master's own lane on every
+-- master page but the overview, otherwise the selected track's.
+function G.cur_seq()
+  local st8 = G.state
+  if st8.mode == "master" then
+    return st8.master_steps() and st8.mseq or nil
+  end
+  return st8.track():seq()
+end
+
+-- Pads belong to whatever sequencer was under them when they went down. If
+-- that changes with pads still held -- a page turn, a track change, K2+K3 --
+-- the pad-up will never reach the branch that would let them go, so they are
+-- dropped here rather than left holding a lock target that has moved.
+local function check_owner(st8, sq)
+  if st8.held_seq == sq then return end
+  st8.held_seq = sq
+  st8.held = {}
+  st8.lock_step, st8.lock_pad = nil, nil
 end
 
 -- ------------------------------------------------------------- addressing
@@ -82,6 +112,20 @@ local function kb_release(st8, key)
   kb_release_entry(st8, key, h)
 end
 
+-- The notes under the fingers right now, in order and without duplicates.
+-- What a step takes when one is pressed while the keyboard is held.
+local function kb_roots(st8)
+  local out, seen = {}, {}
+  for _, h in pairs(st8.kb_held or {}) do
+    if h.note and not seen[h.note] then
+      seen[h.note] = true
+      out[#out + 1] = h.note
+    end
+  end
+  table.sort(out)
+  return out
+end
+
 -- Leaving the keyboard -- into track select, or onto another machine -- means
 -- the pad-up never arrives at the branch that would release the note, so drop
 -- everything still sounding on the way out.
@@ -123,6 +167,24 @@ function G.redraw()
   G.g:all(0)
 
   if st8.mode == "master" then
+    -- every master page but the overview is the master lane's steps, drawn by
+    -- the same ladder a track's pattern is
+    if st8.master_steps() then
+      local sq = st8.mseq
+      check_owner(st8, sq)
+      local len, mark = sq:length(), sq:mark_steps()
+      for y = 1, 8 do
+        for x = 1, 16 do
+          local i = grid_step(x, y)
+          G.g:led(x, y, step_level(sq, sq:disp_step(i), i, sq.pos, len,
+            st8.held[i], mark))
+        end
+      end
+      G.g:refresh()
+      return
+    end
+
+    check_owner(st8, nil)
     for i = 1, 8 do
       local t = st8.tracks[i]
       local sel = (i == st8.sel)
@@ -140,6 +202,7 @@ function G.redraw()
 
   local t = st8.track()
   local sq = t:seq()
+  check_owner(st8, sq)
 
   if sq.kind == "tone" then
     local len, mark = sq:length(), sq:mark_steps()
@@ -197,15 +260,58 @@ local function focus_newest(st8)
   end
 end
 
+-- Reaching from one step to another. The held step is given a Metropolis
+-- stage long enough to arrive at the pad that was tapped: HOLD is the control
+-- the STEP page already carries -- the sequencer sits on the step for that
+-- many pulses instead of one -- so a tone note sustains across the whole
+-- reach, a drum's ratchets spread over it, and the master lane holds its
+-- locked values for the distance. Sustaining a step is saying how far it goes.
+--
+-- The distance is counted in the positions you can see, and it wraps, so
+-- reaching backwards is the long way round rather than nothing. Sixteen
+-- pulses is as far as a stage goes, which is what HOLD holds.
+function G.extend(sq, anchor, pad)
+  local len = sq:length()
+  local step = sq:ensure(anchor.idx)
+  step.on = true
+  step.hold = util.clamp(((pad - anchor.pad) % len) + 1, 1, 16)
+  G.state.dirty = true
+end
+
 -- `pad` is where the finger is, `idx` the step that pad is drawing: under
 -- ROTATE the two differ.
 local function press_step(sq, pad, idx, key)
   local st8 = G.state
   press_n = press_n + 1
   local existed = sq:get_step(idx) ~= nil
-  if not existed then sq:ensure(idx) end
+
+  -- Whatever is already down is what this press might be reaching from. The
+  -- release decides whether it was a reach or another pad in a lock gesture,
+  -- but the anchor is marked now: a step someone has reached from is not a
+  -- step to toggle off, whichever of the two pads comes up first.
+  local anchor
+  for _, h in pairs(st8.held) do
+    if not anchor or h.n > anchor.n then anchor = h end
+  end
+  if anchor then anchor.reached = true end
+
+  -- Notes held on the keyboard and a step pressed: the step takes them. It is
+  -- the hold-a-step-and-play gesture from the other end, and it is the faster
+  -- one when the chord is already under your fingers.
+  local written = false
+  if sq.kind == "tone" then
+    local roots = kb_roots(st8)
+    if #roots > 0 then
+      local step = sq:ensure(idx)
+      step.notes = roots
+      step.on = true
+      written = true
+    end
+  end
+
+  if not (existed or written) then sq:ensure(idx) end
   st8.held[key] = { t = util.time(), n = press_n, pad = pad, idx = idx,
-                    existed = existed, locked = false }
+                    existed = existed, locked = written, anchor = anchor }
   focus_newest(st8)
   st8.dirty = true
 end
@@ -215,8 +321,14 @@ local function release_step(sq, key)
   local h = st8.held[key]
   st8.held[key] = nil
   if not h then return end
-  -- a quick press on an existing step clears it; a hold was a lock gesture
-  if h.existed and not h.locked and (util.time() - h.t) < HOLD_TIME then
+  local quick = (util.time() - h.t) < HOLD_TIME
+  if quick and not h.locked and h.anchor then
+    -- a tap landing while another pad was down is a reach, not a step: it
+    -- says where the held step should carry to, and nothing is toggled
+    G.extend(sq, h.anchor, h.pad)
+    if not h.existed then sq:store()[h.idx] = nil end
+  elseif quick and not h.locked and not h.reached and h.existed then
+    -- a quick press on an existing step clears it; a hold was a lock gesture
     sq:store()[h.idx] = nil
   end
   focus_newest(st8)
@@ -228,6 +340,23 @@ function G.key(x, y, z)
 
   if st8.mode == "master" then
     G.kb_panic()
+
+    -- every master page but the overview is the master lane
+    if st8.master_steps() then
+      local sq = st8.mseq
+      check_owner(st8, sq)
+      local pad = grid_step(x, y)
+      if pad > sq.maxlen then return end
+      if z == 1 then
+        if pad > sq:length() then return end
+        press_step(sq, pad, sq:disp(pad), pad)
+      else
+        release_step(sq, pad)
+      end
+      return
+    end
+
+    check_owner(st8, nil)
     if z == 1 then
       if x <= TRK_HI then
         st8.select_track(y)
@@ -248,6 +377,7 @@ function G.key(x, y, z)
 
   local t = st8.track()
   local sq = t:seq()
+  check_owner(st8, sq)
 
   if sq.kind == "tone" and y >= 5 then
     local key = kb_key(x, y)
@@ -308,6 +438,7 @@ end
 -- returns true if the edit was captured as a parameter lock
 function G.try_lock(sp, delta)
   local st8 = G.state
+  if st8.mode == "master" then return false end
   if not st8.lock_step or not sp then return false end
   local t = st8.track()
   local sq = t:seq()
@@ -337,15 +468,61 @@ function G.try_lock(sp, delta)
   return true
 end
 
--- E1 sets the held steps' velocity, since track select is not needed then
+-- E1 sets the held steps' velocity, since track select is not needed then.
+-- The master lane declines it: its steps never sound, so a velocity on one
+-- would be a number written where nothing reads it and nothing shows it, and
+-- E1 is better left picking a track.
 function G.try_velocity(delta)
   local st8 = G.state
   if not st8.lock_step then return false end
-  local sq = st8.track():seq()
+  local sq = G.cur_seq()
+  if not sq or sq.kind == "master" then return false end
   local held = held_steps(st8, sq)
   if #held == 0 then return false end
   for _, e in ipairs(held) do
     e.step.vel = util.clamp((e.step.vel or 100) + (delta * 4), 1, 127)
+    e.h.locked = true
+  end
+  return true
+end
+
+-- ------------------------------------------------ the master's own locks
+--
+-- The same gesture on the master's lane: hold one of its steps and turn E3,
+-- and whatever the cursor is on is locked to that step. The master keeps its
+-- own value and nothing is written into the norns param -- the locked value
+-- goes at the engine when the step comes round and is taken back when it
+-- passes, which is what makes the lane play rather than leave the knob moved.
+--
+-- A lock is keyed by param name here rather than by control-bus channel. Seq
+-- never looks at the key, so both kinds of lock go through the same code.
+function G.try_master_lock(delta)
+  local st8 = G.state
+  if st8.mode ~= "master" or not st8.lock_step then return false end
+  local sq = st8.mseq
+  local held = held_steps(st8, sq)
+  if #held == 0 then return false end
+  local pg = st8.master_page()
+
+  -- the lane's own settings, on its SEQ page: the ones that mean something on
+  -- a single step. Length, speed, metre and direction describe the whole lane.
+  if pg.kind == "seq" then
+    local sp = st8.master_spec()
+    if not (sp and STEP_SEQ[sp.id]) then return false end
+    for _, e in ipairs(held) do
+      local cur = e.step[sp.id] or sq:get(sp)
+      e.step[sp.id] = util.clamp(cur + delta, sp.min, sp.max)
+      e.h.locked = true
+    end
+    return true
+  end
+
+  local ent = st8.master_param()
+  if not M.lockable(ent) then return false end
+  for _, e in ipairs(held) do
+    e.step.lock = e.step.lock or {}
+    local cur = e.step.lock[ent.param] or M.value(ent)
+    e.step.lock[ent.param] = M.lock_delta(ent, cur, delta)
     e.h.locked = true
   end
   return true

@@ -236,9 +236,18 @@ local function draw_master_header(state, pg)
   screen.level(15)
   screen.move(0, 6)
   screen.text(state.playing and "PLAY" or "STOP")
-  screen.level(4)
+
+  -- a lock gesture on the master lane says so, and over how many pads, the
+  -- same way a track's header does
+  local label = pg.name
+  if state.lock_pad then
+    label = "LOCK " .. state.lock_pad
+    local n = state.lock_count()
+    if n > 1 then label = label .. "+" .. (n - 1) end
+  end
+  screen.level(state.lock_pad and 15 or 4)
   screen.move(28, 6)
-  screen.text(pg.name)
+  screen.text(label)
 
   local n = #M.pages
   local x0 = 128 - (n * 3)
@@ -346,16 +355,42 @@ local function draw_master_params(state, pg)
     screen.move(x + 2, y + 6)
     screen.text(e.name)
 
+    local lockv = state.mlock_param(e)
+
     local extra = M.glyph_extra(e) or {}
     extra.now = now
     extra.live = sel and LIVE[e.g] or false
     if extra.live then P.anim = true end
-    W.draw(e.g or "bar", x + 2, y + 9, CW - 6, 9, pseudo, M.norm(e),
-      sel and 15 or 9, extra)
+    W.draw(e.g or "bar", x + 2, y + 9, CW - 6, 9, pseudo,
+      lockv and M.norm_of(e, lockv) or M.norm(e), sel and 15 or 9, extra)
 
     screen.level(sel and 15 or 6)
     screen.move(x + 2, y + 24)
-    screen.text(M.text(e))
+    screen.text(lockv and M.text_of(e, lockv) or M.text(e))
+    -- a locked value is flagged, so it is never mistaken for the master's own
+    if lockv then
+      screen.level(15)
+      screen.rect(x + CW - 6, y + 20, 3, 3)
+      screen.fill()
+    end
+  end
+end
+
+-- The master lane's own settings, drawn by the cell code a track's SEQ page
+-- uses: same eight boxes, same glyphs, same lock-only strike-out on HOLD.
+-- The master is shaped like a track for exactly this reason.
+local function draw_master_seq(state, pg)
+  screen.level(1)
+  for c = 1, 3 do
+    screen.rect(c * CW - 1, TOP, 1, CH * 2 - 3)
+  end
+  screen.fill()
+
+  local mt = state.mtrack
+  local holding = state.lock_step ~= nil
+  for i = 1, math.min(8, #pg.params) do
+    local sp = pg.params[i]
+    draw_cell(mt, sp, i, i == state.mcursor, state.mlock_seq(sp), false, holding)
   end
 end
 
@@ -364,7 +399,13 @@ function P.draw_master(state)
   draw_master_header(state, pg)
   if pg.kind == "over" then draw_over(state)
   elseif pg.kind == "mix" then draw_mix(state)
+  elseif pg.kind == "seq" then draw_master_seq(state, pg)
   else draw_master_params(state, pg) end
+  -- the lane's position, along the bottom edge, on every page that is the
+  -- lane. The overview draws eight of its own and MIX ends where this starts.
+  if pg.kind ~= "over" and pg.kind ~= "mix" then
+    draw_footer(state.mtrack)
+  end
 end
 
 function P.redraw(state)

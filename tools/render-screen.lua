@@ -224,7 +224,7 @@ end
 
 -- the master: its own page set, K2+K3 to reach it
 do
-  local names = { "OVER", "PERFORM", "MIX", "COLOUR", "SEND FX",
+  local names = { "OVER", "SEQ", "PERFORM", "MIX", "COLOUR", "SEND FX",
                   "SONG", "CHORUS", "DELAY", "REVERB" }
   state.mode = "master"
   -- COLOUR ships at zero all the way across, which draws eight cells of
@@ -255,6 +255,26 @@ do
     save(nm, title)
     shots[#shots + 1] = { name = nm, title = title }
   end
+
+  -- the master lane: its own sequencer settings with a step held, so HOLD is
+  -- awake rather than struck out, and a master parameter locked to a step
+  local function mshot(pg, cur, pad, delta, nm, title)
+    state.set_master_page(pg)
+    state.mcursor = cur
+    tahned.grid.g.key(pad, 1, 1)
+    if delta ~= 0 then enc(3, delta) end
+    S.clear(); redraw()
+    save(nm, title)
+    shots[#shots + 1] = { name = nm, title = title }
+    tahned.grid.g.key(pad, 1, 0)
+  end
+
+  mshot(2, 8, 3, 3, "31-master-seq-hold",
+    "K2+K3  master SEQ  step 3 held, a four pulse stage on it")
+  mshot(5, 1, 3, 26, "32-master-lock",
+    "K2+K3  master COLOUR  step 3 held, CRUSH locked to it")
+  state.mseq:clear()
+
   state.mode = "page"
 end
 

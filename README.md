@@ -211,12 +211,13 @@ page.
 | | |
 |---|---|
 | 1 **OVER** | the eight tracks with their machine, their mute and the pattern each one is playing, its playhead walking |
-| 2 **PERFORM** | eight offsets that land on every voice on every track at once — `PITCH ATTACK DECAY TIMBRE CUTOFF RES FOLD DRIVE`. Centre is no change, so the page is safe to leave where it is |
-| 3 **MIX** | the eight track levels as faders. It is the same channel each track's own MIX page turns |
-| 4 **COLOUR** | `CRUSH WOW W.RATE SATURN TILT LOSS GLITCH COMP` |
-| 5 **SEND FX** | two controls each for the reverb, the delay, the chorus and the master drive |
-| 6 **SONG** | tempo, and the key everything plays in — `BPM ROOT SCALE` |
-| 7–9 | chorus, delay and reverb in full |
+| 2 **SEQ** | the master's own sequencer — `LENGTH SPEED TSIG SWING DIR ROTATE PROB HOLD` |
+| 3 **PERFORM** | eight offsets that land on every voice on every track at once — `PITCH ATTACK DECAY TIMBRE CUTOFF RES FOLD DRIVE`. Centre is no change, so the page is safe to leave where it is |
+| 4 **MIX** | the eight track levels as faders. It is the same channel each track's own MIX page turns |
+| 5 **COLOUR** | `CRUSH WOW W.RATE SATURN TILT LOSS GLITCH COMP` |
+| 6 **SEND FX** | two controls each for the reverb, the delay, the chorus and the master drive |
+| 7 **SONG** | tempo, and the key everything plays in — `BPM ROOT SCALE` |
+| 8–10 | chorus, delay and reverb in full |
 
 Everything from PERFORM on is a norns param, so it saves with the PSET and
 sits in the menu too — but reaching for the menu to set a delay time in the
@@ -224,9 +225,43 @@ middle of a take is not a thing anybody wants to do. SEND FX is a shortcut
 rather than a fourth copy: turning `R.SIZE` there and turning `SIZE` on the
 reverb page are the same act.
 
-On the grid, columns 1–6 pick the track, 8–13 set its machine, 15 mutes it,
-and column 16 rows 1–2 are play/stop and reset. Selecting a track returns you
-to the page you last had open on it.
+On the overview, the grid is columns 1–6 to pick the track, 8–13 to set its
+machine, 15 to mute it, and column 16 rows 1–2 for play/stop and reset.
+Selecting a track returns you to the page you last had open on it.
+
+### The master's own sequencer
+
+The master has a sequencer too — one lane, not eight — and **every master page
+but the overview shares it**. The grid on those pages is its steps, all eight
+rows, up to 128, lit by the same ladder a track's pattern is; holding one and
+turning **E3** locks whatever the cursor is on to that step, exactly the way a
+track's steps lock a track's channels.
+
+That is what makes `PITCH` on PERFORM a transpose lane and COLOUR a lane of
+automation, rather than eight knobs you have to be holding at the right
+moment. A lock is never written into the param: the master keeps its own
+value, the locked one goes at the engine while the step is current and is
+handed back when it passes, so what you hear is the lane playing rather than
+the whole instrument following the last step that went by.
+
+Two pages are deliberately not lockable. **SONG** holds the tempo and the key:
+the norns clock is not the engine's to move, and root and scale are what every
+stored note was written against — moving them per step would rewrite the song
+eight times a bar rather than perform it. **MIX** is eight track faders, and
+each of those already locks on its own track's sequencer. On both, E3 turns
+the control the way it always did, held step or not.
+
+The lane has its own **SEQ** page, which is a track's SEQ page minus the two
+controls that are about making a sound: this lane never sounds, so there is
+nothing for a ratchet or a strum to do to it. It has its own length, speed,
+time signature, swing, direction, rotation and probability, so the automation
+can run in its own metre against the tracks — and its own `HOLD`, which is
+where the reach gesture below writes.
+
+It is not a ninth track. The master is shaped like one — enough of one to own
+a sequencer — but it holds no sound, and the only difference inside the
+sequencer is what a lock is keyed by: a track's by control-bus channel, the
+master's by param name. The sequencer itself never looks.
 
 ### Parameter locks
 
@@ -246,6 +281,30 @@ whole instrument following your hand.
 
 A quick press toggles a step; a hold is a lock gesture and leaves it alone.
 
+### Reaching
+
+Holding one pad and **tapping another** is a third thing, and it is how a step
+is sustained: the held step is stretched to arrive at the pad you tapped. It
+writes `HOLD` — the Metropolis stage below — so a TONE note sustains across the
+whole distance, a drum's ratchets spread over it, and the master lane holds its
+locked values for it. You say how far the step goes by touching where it ends.
+
+The distance is counted in the positions you can see and it wraps, so reaching
+backwards is the long way round rather than nothing, and it stops at sixteen
+pulses, which is as far as a stage goes.
+
+Held is a lock gesture and tapped is a reach, which is the same distinction a
+lone pad already makes between a hold and a press — so holding three pads and
+turning E3 still locks all three, and neither pad is toggled by a reach.
+
+### Writing notes, from either end
+
+On TONE it works both ways round. **Hold a step and play the keyboard** and the
+notes land on that step; **hold the keyboard and press a step** and the step
+takes whatever is under your fingers. The second is the faster one when the
+chord is already being held, and it is the same act — a step and some notes,
+in whichever order they arrived.
+
 ### Stages
 
 `HOLD` and `HTYPE` are **lock-only**: their cells are struck out until a grid
@@ -253,7 +312,9 @@ pad is down, because a `HOLD` written across a whole track would just be a
 slower track — the point is one step that stalls.
 
 `HOLD` is the Metropolis stage: the sequencer stays on that step for that many
-pulses instead of one, and `HTYPE` says what it does with them.
+pulses instead of one, and `HTYPE` says what it does with them. It is what the
+reach gesture writes, so the cell is usually where you *read* a stage that was
+set by touching two pads rather than where you set one.
 
 | | |
 |---|---|
@@ -274,7 +335,14 @@ What the 16×8 shows depends on the selected track's machine:
 - **the drums** — all eight rows are steps, sixteen to a row, up to 128
 - **TONE** — rows 1–4 are 64 steps, rows 5–8 an isomorphic keyboard (a scale
   degree per column, a third per row). Hold a step and play the keyboard to
-  write notes onto it; play it with no step held to audition.
+  write notes onto it, or hold the keyboard and press a step to do the same
+  from the other end; play the keyboard with no step held to audition.
+- **the master**, on every one of its pages but the overview — all eight rows
+  are the master lane's steps
+
+Pads belong to whichever sequencer was under them when they went down, so a
+page turn or a track change with pads still held drops them rather than
+leaving a lock pointed at a step that has moved.
 
 The lighting is a ladder, so a pattern reads without counting pads:
 
@@ -321,6 +389,26 @@ Both tracks are reading the same root and scale while they do it. The key is
 one setting on the master's SONG page rather than a copy per track — eight
 tracks in eight different scales was never a thing anybody reached for, and a
 follower in a different scale from its leader is simply wrong.
+
+### Moving the key
+
+`ROOT` and `SCALE` are not only read when a step is resolved: **moving them
+moves everything already written**. A stored note is an absolute note number —
+it has to be, since what reaches the engine is a frequency — so without this a
+new root would leave every written note in the old key and the song would be
+in two at once.
+
+A root change is a transposition, by the shorter of the two ways round, so a
+pattern keeps its register rather than jumping most of an octave to reach a
+neighbouring key. A scale change then snaps each note into the new scale,
+nearest first, which keeps the contour and the register and is the most a
+scale change can honestly promise: two degrees can land on one note when the
+new scale has fewer of them.
+
+It reaches every slot of every track, not just the machines that happen to be
+selected — a pattern parked on a machine nobody is looking at is still part of
+the song. Drum steps are left alone: a drum's `NOTE` is an offset in semitones
+from its own tuning and has nothing to do with the scale.
 
 ## Effects
 
@@ -376,6 +464,12 @@ ch 88..95  spare -- 88 is the LFO null destination
 One more bus is global rather than per track: eight channels of PERFORM
 offset, read by every voice on every track alongside its own parameters. Each
 is −1..1 and does nothing at 0, so the page can be left wherever it is.
+
+The master's own sequencer is the same sequencer, with the same step store and
+the same lock machinery. Its locks are keyed by norns param name rather than
+by channel, and applying one calls the param's group command instead of
+`pset` — which is the whole of the difference, and is why the master needed an
+object shaped like a track rather than a second sequencer.
 
 Bipolar controls run −63..63 rather than −64..63, so their centre normalises
 to exactly 0.5 and a control sitting at zero reaches the engine as nothing.
@@ -491,9 +585,12 @@ sheet is rebuilt from the same draws, so it cannot go stale.
 
 - Never run on hardware. Everything here has been rendered offline and
   measured, never played.
-- Pattern data from before the channel map moved will not load; the version
-  in the file is checked and a mismatch is refused rather than read wrong.
+- Pattern data from before the channel map moved, or from before the master
+  gained a sequencer, will not load; the version in the file is checked and a
+  mismatch is refused rather than read wrong.
 - Per-step micro-timing is not implemented.
+- The master lane cannot lock a *track* parameter — its MIX page is the one
+  place that would be, and eight faders each already lock on their own track.
 - The drums have no ALGO: each one's routing is fixed, chosen for that drum.
   Eight controls is the budget and a routing switch is not the best use of one.
 - Copy, paste and pattern chaining.

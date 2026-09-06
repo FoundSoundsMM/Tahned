@@ -1,10 +1,13 @@
 -- sequencer.lua
 --
--- One sequencer per (track, machine) slot. Two behaviours share the step
--- store, direction logic, probability and parameter locks:
+-- One sequencer per (track, machine) slot, and one more for the master. Three
+-- behaviours share the step store, direction logic, probability and parameter
+-- locks:
 --
---   drum  up to 128 steps, ratchets, per-step note offset
---   tone  up to 64 steps holding chords, with leader/follower harmony
+--   drum    up to 128 steps, ratchets, per-step note offset
+--   tone    up to 64 steps holding chords, with leader/follower harmony
+--   master  up to 128 steps that only ever carry locks -- an automation lane
+--           over the master parameters, which is why it fires nothing
 --
 -- A step is sparse -- nil means empty. Anything the step does not override
 -- falls back to the track's sequencer settings.
@@ -16,7 +19,7 @@ local musicutil = require "musicutil"
 local Seq = {}
 Seq.__index = Seq
 
-local MAXLEN = { drum = 128, tone = 64 }
+local MAXLEN = { drum = 128, tone = 64, master = 128 }
 
 -- ---------------------------------------------------------------- creation
 
@@ -285,6 +288,34 @@ function Seq:scale_array()
   return musicutil.generate_scale(M.root(), M.scale_name(), 10)
 end
 
+-- The key changed under the pattern, so the pattern moves with it. A stored
+-- note is an absolute note number -- it has to be, since the engine is told a
+-- frequency -- which means a new root or a new scale would otherwise leave
+-- every written note where it was and the song in two keys at once.
+--
+-- A root change is a transposition, by the shorter of the two ways round so
+-- the pattern keeps its register rather than jumping most of an octave to
+-- reach a neighbouring key. A scale change then snaps each note into the new
+-- scale, nearest first, which keeps the contour and the register and is the
+-- most a scale change can honestly promise: two degrees can land on one note
+-- when the new scale has fewer of them.
+function Seq:rekey(prev, now)
+  if self.kind ~= "tone" then return end
+  local shift = (((now.root - prev.root) + 6) % 12) - 6
+  local resnap = (prev.scale ~= now.scale)
+  if shift == 0 and not resnap then return end
+  local arr = resnap and self:scale_array() or nil
+  for _, st in pairs(self.steps) do
+    if st.notes then
+      for k, n in ipairs(st.notes) do
+        local v = n + shift
+        if arr then v = musicutil.snap_note_to_array(v, arr) end
+        st.notes[k] = util.clamp(v, 0, 127)
+      end
+    end
+  end
+end
+
 function Seq:leader()
   local li = self.s.leader or 0
   if li == 0 or not self.tracks then return nil end
@@ -386,6 +417,9 @@ function Seq:fire(i, beats, amp)
   self:apply_locks(st)
   if not (st and st.on) then return end
   if not self:chance(st) then return end
+  -- the master lane is locks and nothing else: applying them above is the
+  -- whole of what its step does
+  if self.kind == "master" then return end
 
   if self.kind == "drum" then
     local vel = ((st.vel or 100) / 127) * amp

@@ -4,17 +4,25 @@
 -- a track's pages:
 --
 --   1 OVER     the eight tracks, their machines and their patterns
---   2 PERFORM  eight offsets applied to every instrument at once
---   3 MIX      the eight track levels as faders
---   4 COLOUR   one colour chain across the whole mix
---   5 SEND FX  two controls each for the three sends and the master drive
---   6 SONG     tempo, and the key everything plays in
---   7..9       the three sends in full
+--   2 SEQ      the master's own sequencer: the lane every other page locks to
+--   3 PERFORM  eight offsets applied to every instrument at once
+--   4 MIX      the eight track levels as faders
+--   5 COLOUR   one colour chain across the whole mix
+--   6 SEND FX  two controls each for the three sends and the master drive
+--   7 SONG     tempo, and the key everything plays in
+--   8..10      the three sends in full
 --
 -- Everything from PERFORM on is a norns param, so it saves with the PSET and
 -- sits in the menu too -- but reaching for the menu to set a delay time in
 -- the middle of a take is not a thing anybody wants to do.
+--
+-- The master has a sequencer of its own, one lane rather than eight, and
+-- every page but the overview shares it: the grid is its steps, and holding
+-- one and turning E3 locks whatever the cursor is on to that step. That is
+-- what makes PERFORM PITCH a transpose track and COLOUR a lane of automation
+-- rather than eight knobs you have to be holding at the right moment.
 
+local S = include("tahned/lib/core/spec")
 local C = include("tahned/lib/instruments/common")
 local musicutil = require "musicutil"
 
@@ -88,7 +96,30 @@ group("drv", "DRIVE", function(e, v) engine.colSet(e.id, v) end, {
 local SCALE_NAMES = {}
 for i, sc in ipairs(musicutil.SCALES) do SCALE_NAMES[i] = sc.name end
 
-group("key", "KEY", function() end, {
+-- Moving the key moves the music that is already written: a stored note is an
+-- absolute note number, so without this a new root would leave every note in
+-- the old key and the song would be in two at once. The notes belong to the
+-- sequencers rather than to the master, so this only says that the key moved
+-- and by how much -- tahned.lua points `on_key_change` at state.rekey, which
+-- walks every track's every slot.
+--
+-- The previous key is remembered here rather than read back, since by the
+-- time the action fires the param already holds the new one. It is nil until
+-- the first bang, so building the params is not itself a key change.
+M.on_key_change = nil
+
+local key_prev = nil
+
+local function key_changed()
+  local now = { root = M.root(), scale = M.scale_index() }
+  local prev = key_prev
+  key_prev = now
+  if not prev then return end
+  if prev.root == now.root and prev.scale == now.scale then return end
+  if M.on_key_change then M.on_key_change(prev, now) end
+end
+
+group("key", "KEY", key_changed, {
   { id = "root",  name = "ROOT",  opts = C.NOTE_NAMES, def = 1, g = "root" },
   { id = "scale", name = "SCALE", opts = SCALE_NAMES,  def = 1, g = "scale" },
 })
@@ -133,8 +164,16 @@ for _, key in ipairs(M.order) do
       e.id, e.name, e.spec, e.g = e[1], e[2], e[3], e[4]
       e[1], e[2], e[3], e[4] = nil, nil, nil, nil
     end
+    e.group = key
     e.param = key .. "_" .. e.id
   end
+end
+
+-- param name -> the canonical entry, so a page that only holds a copy of one
+-- (SEND FX does) can still find the group whose send command it belongs to
+M.by_param = {}
+for _, key in ipairs(M.order) do
+  for _, e in ipairs(M.groups[key].p) do M.by_param[e.param] = e end
 end
 
 -- ------------------------------------------------------------------- pages
@@ -171,8 +210,29 @@ local sendfx = {
   pick("drv", "dtone", "TONE"),
 }
 
+-- The master's own sequencer settings. The same seven a track's SEQ page
+-- carries, minus the two that are about making a sound: this lane never
+-- sounds, so there is nothing for a ratchet or a strum to do to it. They are
+-- lua-side S.seq specs rather than norns params, exactly like a track's, and
+-- they are drawn by the same cell code.
+M.seqpage = { name = "SEQ", kind = "seq", params = {
+  S.seq("length", "LENGTH", { min = 1, max = 128, def = 16, g = "len" }),
+  S.seq("speed",  "SPEED",  { opts = C.SPEED_NAMES, def = 5, g = "pulse" }),
+  S.seq("tsig",   "TSIG",   { opts = C.TSIG_NAMES, def = 0, g = "tsig" }),
+  S.seq("swing",  "SWING",  { min = -50, max = 50, def = 0, g = "swing" }),
+  S.seq("dir",    "DIR",    { opts = S.DIRS, g = "dir" }),
+  S.seq("rotate", "ROTATE", { min = -64, max = 64, def = 0, g = "bi" }),
+  S.seq("prob",   "PROB",   { min = 0, max = 100, def = 100, g = "prob" }),
+  -- the reach gesture on the grid writes this; the cell is where you see what
+  -- it wrote and where you change it by hand. Lock-only, like a track's, since
+  -- a stage on every step of the lane would just be a slower lane.
+  S.seq("hold",   "HOLD",   { min = 1, max = 16, def = 1, g = "hold_n",
+                              lock = true }),
+}}
+
 M.pages = {
   { name = "OVER",    kind = "over" },
+  M.seqpage,
   { name = "PERFORM", kind = "params", p = M.groups.perf.p },
   { name = "MIX",     kind = "mix" },
   { name = "COLOUR",  kind = "params", p = M.groups.col.p },
@@ -186,13 +246,20 @@ M.pages = {
 function M.page(i) return M.pages[util.clamp(i, 1, #M.pages)] end
 
 -- how many cells a page has under the cursor: eight tracks on MIX, the
--- parameter count on a params page, and nothing to walk on the overview
+-- parameter count on a params page, the setting count on the sequencer's own,
+-- and nothing to walk on the overview
 function M.page_cells(i)
   local pg = M.page(i)
   if pg.kind == "mix" then return 8 end
   if pg.kind == "params" then return #pg.p end
+  if pg.kind == "seq" then return #pg.params end
   return 1
 end
+
+-- The overview is the one master page the grid does not give to the master
+-- sequencer: it is where tracks, machines, mutes and transport live, and it
+-- was never going to be steps.
+function M.has_steps(i) return M.page(i).kind ~= "over" end
 
 function M.param(i, c)
   local pg = M.page(i)
@@ -224,15 +291,16 @@ function M.text(e)
   return (#s > MAXTEXT) and s:sub(1, MAXTEXT) or s
 end
 
--- 0..1 position inside the spec, for the glyph.
-function M.norm(e)
+-- 0..1 position inside the spec, for the glyph. Takes the value rather than
+-- reading it, so a step's locked value draws in the same cell the master's
+-- own one would.
+function M.norm_of(e, v)
   if e.opts then
     local n = #e.opts
     if n < 2 then return 0 end
-    return util.clamp((pget(e.param, 1) - 1) / (n - 1), 0, 1)
+    return util.clamp(((tonumber(v) or 1) - 1) / (n - 1), 0, 1)
   end
   local sp = e.spec
-  local v = params:get(e.param)
   if not (sp and type(v) == "number") then return 0 end
   -- a controlspec knows its own warp, and unmap is the position it maps from.
   -- Reading an exp control linearly crowded everything musical into the first
@@ -244,6 +312,89 @@ function M.norm(e)
   local lo, hi = sp.minval or 0, sp.maxval or 1
   if hi == lo then return 0 end
   return util.clamp((v - lo) / (hi - lo), 0, 1)
+end
+
+function M.norm(e)
+  if e.opts then return M.norm_of(e, pget(e.param, 1)) end
+  return M.norm_of(e, params:get(e.param))
+end
+
+-- The readout for a value that is not the param's own. params:string is the
+-- formatted, unit-carrying one norns keeps and it can only speak for what the
+-- param currently holds, so a locked value falls back to plain formatting.
+function M.text_of(e, v)
+  if e.opts then return e.opts[util.clamp(util.round(v), 1, #e.opts)] or "-" end
+  if type(v) ~= "number" then return "-" end
+  local s = (v == math.floor(v)) and string.format("%d", v)
+                                 or string.format("%.2f", v)
+  return (#s > MAXTEXT) and s:sub(1, MAXTEXT) or s
+end
+
+-- --------------------------------------------------------------- locking
+--
+-- The master's sequencer locks a master parameter to a step the way a track's
+-- locks a channel. A lock is never written into the param: the master keeps
+-- its own value and the locked one goes straight to the engine for as long as
+-- the step is current, so what you hear is the lane playing rather than the
+-- whole instrument following the last step that went by.
+--
+-- Two groups are deliberately not lockable. BPM is the norns clock, which the
+-- engine has no say over, and the key is what every stored note was written
+-- against -- moving root or scale per step would rewrite the song eight times
+-- a bar rather than perform it. The MIX page is eight track faders, and each
+-- of those already locks on its own track's sequencer.
+local NO_LOCK = { key = true }
+
+local function canon(e)
+  return e and e.param and M.by_param[e.param] or nil
+end
+
+function M.lockable(e)
+  local c = canon(e)
+  return (c ~= nil) and not NO_LOCK[c.group]
+end
+
+-- push a value at the engine without storing it anywhere
+function M.send_lock(param, v)
+  local c = M.by_param[param]
+  if not (c and not NO_LOCK[c.group]) then return end
+  M.groups[c.group].send(c, v)
+end
+
+-- put the master's own value back, when the locked step passes
+function M.send_now(param)
+  local c = M.by_param[param]
+  if not (c and not NO_LOCK[c.group]) then return end
+  local v = pget(param, nil)
+  if type(v) == "number" then M.groups[c.group].send(c, v) end
+end
+
+-- One encoder click on a locked value, in the param's own units. An option
+-- steps by one; a control moves a hundredth of its travel, through the warp
+-- where the spec has one, which is what params:delta would have done.
+function M.lock_delta(e, v, d)
+  if e.opts then
+    return util.clamp(util.round(v) + d, 1, #e.opts)
+  end
+  local sp = e.spec
+  if not sp then return v + d end
+  local lo, hi = sp.minval or 0, sp.maxval or 1
+  if sp.unmap and sp.map then
+    local ok, u = pcall(function() return sp:unmap(v) end)
+    if ok and type(u) == "number" then
+      local ok2, mapped = pcall(function()
+        return sp:map(util.clamp(u + (d / 100), 0, 1))
+      end)
+      if ok2 and type(mapped) == "number" then return util.clamp(mapped, lo, hi) end
+    end
+  end
+  return util.clamp(v + (d * (hi - lo) / 100), lo, hi)
+end
+
+-- the master's own value for a param, which is what a lock starts from
+function M.value(e)
+  if e.opts then return pget(e.param, 1) end
+  return pget(e.param, (e.spec and e.spec.minval) or 0)
 end
 
 -- what a glyph needs beyond the number. SCALE draws the notes the scale

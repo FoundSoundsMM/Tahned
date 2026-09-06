@@ -34,7 +34,7 @@ util = {
 local draws = 0
 screen = setmetatable({}, { __index = function() return function() draws = draws + 1 end end })
 
-local engine_calls = {}
+local engine_calls, engine_last = {}, {}
 
 -- the engine keeps one voice per (track, id) and frees it on noteOff, so the
 -- stub mirrors that: whatever is left here is a note left sounding
@@ -49,6 +49,7 @@ engine = setmetatable({ name = "" }, { __index = function(_, k)
   return function(...)
     engine_calls[k] = (engine_calls[k] or 0) + 1
     local a = { ... }
+    engine_last[k] = a
     if k == "noteOn" then voices[a[1] .. ":" .. a[2]] = a[3]
     elseif k == "noteOff" then voices[a[1] .. ":" .. a[2]] = nil
     elseif k == "allOff" then
@@ -86,8 +87,15 @@ metro = { init = function(f, t) return { start = function() end, stop = function
 controlspec = { new = function(a, b, c, d, e, u)
   return { minval = a, maxval = b, default = e or a } end }
 
--- params holds real values, so the master page has something to read and turn
+-- params holds real values, so the master page has something to read and turn.
+-- set and delta fire the param's action the way norns' do, which matters here:
+-- the key's action is what moves the notes already written.
 local param_actions, param_val, param_spec = {}, { clock_tempo = 120 }, {}
+local param_opts = {}
+local function param_fire(id)
+  local f = param_actions[id]
+  if f then f(param_val[id]) end
+end
 params = {
   add_separator = function() end,
   add_group = function() end,
@@ -95,17 +103,31 @@ params = {
     param_spec[id] = spec
     param_val[id] = spec and spec.default or 0
   end,
+  add_option = function(_, id, _, list, def)
+    param_opts[id] = list
+    param_val[id] = def or 1
+  end,
   add_trigger = function() end,
   set_action = function(_, id, f) param_actions[id] = f end,
   get = function(_, id) return param_val[id] end,
-  set = function(_, id, v) param_val[id] = v end,
-  string = function(_, id) return string.format("%.2f", param_val[id] or 0) end,
-  delta = function(_, id, d)
-    local sp = param_spec[id]
-    local lo, hi = sp and sp.minval or 20, sp and sp.maxval or 300
-    param_val[id] = math.min(math.max((param_val[id] or lo) + (d * (hi - lo) / 100), lo), hi)
+  set = function(_, id, v) param_val[id] = v; param_fire(id) end,
+  string = function(_, id)
+    local o = param_opts[id]
+    if o then return o[param_val[id] or 1] or "-" end
+    return string.format("%.2f", param_val[id] or 0)
   end,
-  bang = function() for _, f in pairs(param_actions) do f(0.5) end end,
+  delta = function(_, id, d)
+    local o = param_opts[id]
+    if o then
+      param_val[id] = math.min(math.max((param_val[id] or 1) + d, 1), #o)
+    else
+      local sp = param_spec[id]
+      local lo, hi = sp and sp.minval or 20, sp and sp.maxval or 300
+      param_val[id] = math.min(math.max((param_val[id] or lo) + (d * (hi - lo) / 100), lo), hi)
+    end
+    param_fire(id)
+  end,
+  bang = function() for id in pairs(param_actions) do param_fire(id) end end,
 }
 setmetatable(params, { __index = function() return function() end end })
 
@@ -351,9 +373,19 @@ check("the master pages walk, and each kind turns what it holds", function()
   for _ = 1, MPAGES + 5 do key(2, 1); key(2, 0) end
   assert(st.mpage == 1, "master pages ran off the front: " .. st.mpage)
 
+  -- the master lane's own settings sit at page 2, drawn and turned by the
+  -- same cell code a track's SEQ page uses
+  st.set_master_page(2)
+  assert(st.master_page().kind == "seq", "page 2 is not the master sequencer")
+  st.mcursor = 1
+  local mlen = st.mseq:length()
+  enc(3, 4)
+  assert(st.mseq:length() ~= mlen, "E3 did not turn the master lane's LENGTH")
+  redraw()
+
   -- MIX: E2 walks the eight tracks and E3 turns the one under the cursor
-  st.set_master_page(3)
-  assert(st.master_page().kind == "mix", "page 3 is not MIX")
+  st.set_master_page(4)
+  assert(st.master_page().kind == "mix", "page 4 is not MIX")
   enc(2, 2)
   assert(st.mcursor == 3, "E2 did not walk the faders")
   local t3 = st.tracks[3]
@@ -364,7 +396,7 @@ check("the master pages walk, and each kind turns what it holds", function()
   redraw()
 
   -- COLOUR and PERFORM are norns params, turned the same way the sends are
-  for _, page in ipairs({ 2, 4 }) do
+  for _, page in ipairs({ 3, 5 }) do
     st.set_master_page(page)
     st.mcursor = 1
     for c = 1, #st.master_page().p do
@@ -378,8 +410,8 @@ check("the master pages walk, and each kind turns what it holds", function()
   end
 
   -- SEND FX points at the same params the full pages hold
-  st.set_master_page(5)
-  assert(st.master_page().name == "SEND FX", "page 5 is not SEND FX")
+  st.set_master_page(6)
+  assert(st.master_page().name == "SEND FX", "page 6 is not SEND FX")
   st.mcursor = 1
   assert(st.master_param().param == "rev_size", "SEND FX does not start on the reverb")
   local sz = params:get("rev_size")
@@ -388,9 +420,9 @@ check("the master pages walk, and each kind turns what it holds", function()
   redraw()
 
   -- the clock still lands under the cursor the moment you reach its page
-  st.set_master_page(6)
+  st.set_master_page(7)
   st.mcursor = 1
-  assert(st.master_param().param == "clock_tempo", "page 6 is not the clock")
+  assert(st.master_param().param == "clock_tempo", "page 7 is not the clock")
   local t0 = params:get("clock_tempo")
   enc(3, 4)
   assert(params:get("clock_tempo") ~= t0, "E3 did not move the tempo")
@@ -399,7 +431,7 @@ check("the master pages walk, and each kind turns what it holds", function()
   st.shift = true
   enc(2, 3)
   st.shift = false
-  assert(st.mpage == 9 and st.master_page().name == "REVERB",
+  assert(st.mpage == 10 and st.master_page().name == "REVERB",
     "K1+E2 landed on " .. st.master_page().name)
   enc(2, 2)
   local e = st.master_param()
@@ -483,7 +515,8 @@ end)
 check("master grid selects tracks, all six machines, mutes, transport", function()
   local st = state
   st.mode = "master"
-  G.redraw()
+  st.set_master_page(1)              -- the overview is the one page that is
+  G.redraw()                         -- not the master lane's steps
   G.g.key(1, 5, 1); G.g.key(1, 5, 0)
   assert(st.sel == 5, "track select failed")
   -- columns 8..13 are the six machines, in order
@@ -591,6 +624,215 @@ check("an LFO pointed at BPM moves the tempo, and gives it back", function()
   LFO.step(state.tracks, 1 / 30)
   assert(math.abs(params:get("clock_tempo") - base) < 0.01,
     "the tempo was not handed back: " .. params:get("clock_tempo"))
+end)
+
+-- The three gestures the grid grew: a key change that takes the written notes
+-- with it, the master's own lane, and reaching from one step to another.
+
+check("moving the key moves the notes already written", function()
+  local st = state
+  st.mode = "page"
+  st.select_track(1)
+  st.tracks[1]:set_machine(TONE)
+  local sq = st.seq()
+  sq:clear()
+
+  params:set("key_scale", 1)
+  params:set("key_root", 1)                    -- C, and the key is now known
+  local step = sq:ensure(1)
+  step.notes = { 60, 64, 67 }
+  -- a pattern parked on a machine nobody is looking at moves too
+  local other = st.tracks[2].slot[TONE].seq
+  other:clear()
+  other:ensure(1).notes = { 48 }
+
+  params:set("key_root", 3)                    -- D: everything up a tone
+  assert(step.notes[1] == 62 and step.notes[2] == 66 and step.notes[3] == 69,
+    "the written notes did not follow the root: "
+    .. table.concat(step.notes, ","))
+  assert(other:get_step(1).notes[1] == 50, "an unselected slot kept the old key")
+
+  -- and the long way round is never taken: B is a semitone down, not eleven up
+  params:set("key_root", 2)                    -- C# from D
+  assert(step.notes[1] == 61, "the root moved the long way: " .. step.notes[1])
+
+  -- a scale change re-snaps rather than transposes, and leaves every note in
+  -- the new scale
+  params:set("key_scale", 2)
+  local arr = sq:scale_array()
+  for _, n in ipairs(step.notes) do
+    local found
+    for _, v in ipairs(arr) do if v == n then found = true end end
+    assert(found, "note " .. n .. " is not in the new scale")
+  end
+
+  -- a drum's NOTE is an offset from its own tuning and has nothing to do with
+  -- the key, so it does not move
+  local dr = st.tracks[1].slot[1].seq
+  dr:clear()
+  dr:ensure(1).note = 5
+  params:set("key_root", 8)
+  assert(dr:get_step(1).note == 5, "a drum step followed the key")
+
+  sq:clear(); other:clear(); dr:clear()
+  params:set("key_scale", 1)
+  params:set("key_root", 1)
+end)
+
+check("the master lane locks a master parameter to a step", function()
+  local st = state
+  st.mode = "master"
+  st.set_master_page(5)                        -- COLOUR
+  st.mcursor = 1                               -- CRUSH
+  local sq = st.mseq
+  sq:clear()
+  sq.s.length, sq.s.rotate = 16, 0
+  local e = st.master_param()
+  local own = params:get(e.param)
+  local sent = engine_calls.colSet or 0
+
+  G.redraw()
+  G.g.key(1, 1, 1)
+  assert(st.lock_step == 1, "the master lane did not take the pad")
+  enc(3, 6)
+  local step = sq:get_step(1)
+  assert(step and step.lock and step.lock[e.param], "no master lock written")
+  -- the same rule the track locks follow: nothing is pushed as it is written
+  assert(params:get(e.param) == own, "a lock moved the master's own value")
+  assert((engine_calls.colSet or 0) == sent, "a master lock was sent live")
+  redraw()
+  G.g.key(1, 1, 0)
+
+  -- it reaches the engine when the step comes round, and is handed back when
+  -- the step passes
+  local locked = step.lock[e.param]
+  sq:apply_locks(step)
+  assert(engine_last.colSet[2] == locked,
+    "the lock never reached the engine: " .. tostring(engine_last.colSet[2]))
+  sq:apply_locks(nil)
+  assert(engine_last.colSet[2] == own, "the master's own value was not put back")
+
+  -- the key and the clock are not lockable: E3 turns them as it always did
+  st.set_master_page(7)                        -- SONG
+  st.mcursor = 2                               -- ROOT
+  local r0 = params:get("key_root")
+  G.g.key(2, 1, 1)
+  enc(3, 1)
+  assert(params:get("key_root") ~= r0, "ROOT stopped turning when it cannot lock")
+  local s2 = sq:get_step(2)
+  assert(not (s2 and s2.lock and next(s2.lock)), "the key took a lock")
+  G.g.key(2, 1, 0)
+  params:set("key_root", r0)
+
+  -- the lane's own HOLD is lock-only: it moves onto a held step and nowhere
+  -- else, and E1 stays track select because a master step never sounds
+  st.set_master_page(2)
+  st.mcursor = 8
+  local h0 = st.mseq:get(st.master_spec())
+  enc(3, 3)
+  assert(st.mseq:get(st.master_spec()) == h0, "the lane's HOLD turned unheld")
+  G.g.key(4, 1, 1)
+  enc(3, 3)
+  assert(st.mseq:get_step(4).hold ~= nil, "HOLD did not lock onto the held step")
+  local sel0 = st.sel
+  enc(1, 1)
+  assert(st.sel ~= sel0, "E1 left track select for a velocity nothing reads")
+  G.g.key(4, 1, 0)
+
+  sq:clear()
+  st.set_master_page(1)
+  st.mode = "page"
+end)
+
+check("every master page draws with one of its steps held", function()
+  local st = state
+  st.mode = "master"
+  for pg = 1, MPAGES do
+    st.set_master_page(pg)
+    if st.master_steps() then
+      G.g.key(1, 1, 1)
+      G.redraw()
+      for c = 1, tahned.master.page_cells(pg) do
+        st.mcursor = c
+        redraw()
+      end
+      G.g.key(1, 1, 0)
+    else
+      G.redraw()
+      redraw()
+    end
+  end
+  st.mseq:clear()
+  st.set_master_page(1)
+  st.mode = "page"
+end)
+
+check("reaching from one step to another sustains the first", function()
+  local st = state
+  st.mode = "page"
+  st.select_track(1)
+  st.tracks[1]:set_machine(1)
+  local sq = st.seq()
+  sq:clear()
+  sq.s.length, sq.s.rotate = 16, 0
+
+  G.g.key(1, 1, 1)                             -- hold step 1
+  G.g.key(5, 1, 1)                             -- tap step 5
+  G.g.key(5, 1, 0)
+  G.g.key(1, 1, 0)
+  local step = sq:get_step(1)
+  assert(step, "the step reached from was cleared by its own release")
+  assert(step.hold == 5, "step 1 carries " .. tostring(step.hold) .. ", want 5")
+  assert(sq:get_step(5) == nil, "the pad that was tapped left a step behind")
+
+  -- reaching backwards is the long way round rather than nothing
+  sq:clear()
+  G.g.key(4, 1, 1)
+  G.g.key(2, 1, 1); G.g.key(2, 1, 0)
+  G.g.key(4, 1, 0)
+  assert(sq:get_step(4).hold == 15,
+    "reaching backwards gave " .. tostring(sq:get_step(4).hold) .. ", want 15")
+
+  -- and holding several pads is still a lock gesture, not a reach
+  sq:clear()
+  st.set_page(4)
+  st.cursor = 1
+  G.g.key(1, 1, 1); G.g.key(3, 1, 1)
+  enc(3, 4)
+  G.g.key(3, 1, 0); G.g.key(1, 1, 0)
+  local sp = st.cur_spec()
+  for _, i in ipairs({ 1, 3 }) do
+    local e = sq:get_step(i)
+    assert(e and e.lock and e.lock[sp.ch], "step " .. i .. " took no lock")
+    assert(e.hold == nil, "a lock gesture wrote a reach onto step " .. i)
+  end
+  sq:clear()
+end)
+
+check("notes held on the keyboard write onto a step that is pressed", function()
+  local st = state
+  st.mode = "page"
+  st.select_track(1)
+  st.tracks[1]:set_machine(TONE)
+  local sq = st.seq()
+  sq:clear()
+  sq.s.length, sq.s.rotate = 16, 0
+  st.lock_step = nil
+
+  local n1 = G.kb_note(sq, 2, 6)
+  local n2 = G.kb_note(sq, 5, 6)
+  G.g.key(2, 6, 1)
+  G.g.key(5, 6, 1)
+  G.g.key(3, 1, 1); G.g.key(3, 1, 0)           -- press a step, both ways round
+  G.g.key(5, 6, 0); G.g.key(2, 6, 0)
+
+  local step = sq:get_step(3)
+  assert(step and step.notes and #step.notes == 2,
+    "the step did not take the held notes")
+  assert(step.notes[1] == math.min(n1, n2) and step.notes[2] == math.max(n1, n2),
+    "the step took the wrong notes")
+  assert(voice_count() == 0, "a keyboard note was left sounding")
+  sq:clear()
 end)
 
 check("serialize round trip", function()
