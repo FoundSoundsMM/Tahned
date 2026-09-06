@@ -8,12 +8,15 @@
 --   3 MIX      the eight track levels as faders
 --   4 COLOUR   one colour chain across the whole mix
 --   5 SEND FX  two controls each for the three sends and the master drive
---   6 CLOCK    tempo
+--   6 SONG     tempo, and the key everything plays in
 --   7..9       the three sends in full
 --
 -- Everything from PERFORM on is a norns param, so it saves with the PSET and
 -- sits in the menu too -- but reaching for the menu to set a delay time in
 -- the middle of a take is not a thing anybody wants to do.
+
+local C = include("tahned/lib/instruments/common")
+local musicutil = require "musicutil"
 
 local M = {}
 
@@ -75,52 +78,75 @@ group("drv", "DRIVE", function(e, v) engine.colSet(e.id, v) end, {
   { "dtone", "TONE",  cs(0, 1, "lin", 0, 0.5), "tilt" },
 })
 
+-- KEY. The song's scale and root, which used to be eight separate copies on
+-- eight HARMONY pages. Nothing here reaches the engine -- the sequencers read
+-- it when they resolve a step -- but it is a norns param like the rest, so it
+-- saves with the PSET and turns from the same page machinery.
+--
+-- These two are written with named fields rather than the positional tuple
+-- the engine groups use, because an option param has no controlspec.
+local SCALE_NAMES = {}
+for i, sc in ipairs(musicutil.SCALES) do SCALE_NAMES[i] = sc.name end
+
+group("key", "KEY", function() end, {
+  { id = "root",  name = "ROOT",  opts = C.NOTE_NAMES, def = 1, g = "root" },
+  { id = "scale", name = "SCALE", opts = SCALE_NAMES,  def = 1, g = "scale" },
+})
+
 group("cho", "CHORUS", function(e, v) engine.fxSet("cho", e.id, v) end, {
   { "rate",   "RATE",     cs(0.02, 8, "exp", 0, 0.4, "hz"), "rate" },
-  { "depth",  "DEPTH",    cs(0, 1, "lin", 0, 0.5),  "bar" },
+  { "depth",  "DEPTH",    cs(0, 1, "lin", 0, 0.5),  "depth" },
   { "spread", "SPREAD",   cs(0, 1, "lin", 0, 0.7),  "pan" },
-  { "fbk",    "FEEDBK",   cs(0, 0.85, "lin", 0, 0.2), "bar" },
-  { "tone",   "TONE",     cs(0, 1, "lin", 0, 0.6),  "band" },
+  { "fbk",    "FEEDBK",   cs(0, 0.85, "lin", 0, 0.2), "fbk" },
+  { "tone",   "TONE",     cs(0, 1, "lin", 0, 0.6),  "hicut" },
   { "level",  "LEVEL",    cs(0, 1, "lin", 0, 1),    "bar" },
 })
 
 group("dly", "DELAY", function(e, v) engine.fxSet("dly", e.id, v) end, {
-  { "time",  "TIME",   cs(0.01, 4, "exp", 0, 0.375, "s"), "rel" },
-  { "fbk",   "FEEDBK", cs(0, 0.98, "lin", 0, 0.45), "bar" },
-  { "hp",    "HICUT",  cs(0, 1, "lin", 0, 0.15), "band" },
-  { "lp",    "LOCUT",  cs(0, 1, "lin", 0, 0.75), "band" },
-  { "ping",  "PING",   cs(0, 1, "lin", 0, 0),    "pan" },
+  { "time",  "TIME",   cs(0.01, 4, "exp", 0, 0.375, "s"), "dtime" },
+  { "fbk",   "FEEDBK", cs(0, 0.98, "lin", 0, 0.45), "fbk" },
+  -- `hp` is a high-pass and `lp` a low-pass, so the labels were the wrong
+  -- way round against the engine: the high-pass is the one that cuts lows.
+  { "hp",    "LOCUT",  cs(0, 1, "lin", 0, 0.15), "locut" },
+  { "lp",    "HICUT",  cs(0, 1, "lin", 0, 0.75), "hicut" },
+  { "ping",  "PING",   cs(0, 1, "lin", 0, 0),    "ping" },
   { "mod",   "MOD",    cs(0, 1, "lin", 0, 0.1),  "wow" },
   { "level", "LEVEL",  cs(0, 1, "lin", 0, 1),    "bar" },
 })
 
 group("rev", "REVERB", function(e, v) engine.fxSet("rev", e.id, v) end, {
-  { "size",     "SIZE",   cs(0, 0.97, "lin", 0, 0.7),  "bar" },
-  { "damp",     "DAMP",   cs(0, 1, "lin", 0, 0.4),     "band" },
-  { "shim",     "SHIM",   cs(0, 1, "lin", 0, 0.3),     "bar" },
+  { "size",     "SIZE",   cs(0, 0.97, "lin", 0, 0.7),  "rel" },
+  { "damp",     "DAMP",   cs(0, 1, "lin", 0, 0.4),     "hicut" },
+  { "shim",     "SHIM",   cs(0, 1, "lin", 0, 0.3),     "shim" },
   { "interval", "SH.INT", cs(-12, 24, "lin", 1, 12, "st"), "bi" },
-  { "shimfb",   "SH.FBK", cs(0, 1, "lin", 0, 0.5),     "bar" },
-  { "pre",      "PRE",    cs(0, 0.45, "lin", 0, 0.02, "s"), "rel" },
-  { "lowcut",   "LOCUT",  cs(0, 1, "lin", 0, 0.1),     "band" },
+  { "shimfb",   "SH.FBK", cs(0, 1, "lin", 0, 0.5),     "fbk" },
+  { "pre",      "PRE",    cs(0, 0.45, "lin", 0, 0.02, "s"), "pre" },
+  { "lowcut",   "LOCUT",  cs(0, 1, "lin", 0, 0.1),     "locut" },
   { "level",    "LEVEL",  cs(0, 1, "lin", 0, 1),       "bar" },
 })
 
--- name the fields, now that every entry is in place
+-- name the fields, now that every entry is in place. An entry written with
+-- named fields already (the KEY pair) is left as it is.
 for _, key in ipairs(M.order) do
   for _, e in ipairs(M.groups[key].p) do
-    e.id, e.name, e.spec, e.g = e[1], e[2], e[3], e[4]
+    if e[1] then
+      e.id, e.name, e.spec, e.g = e[1], e[2], e[3], e[4]
+      e[1], e[2], e[3], e[4] = nil, nil, nil, nil
+    end
     e.param = key .. "_" .. e.id
-    e[1], e[2], e[3], e[4] = nil, nil, nil, nil
   end
 end
 
 -- ------------------------------------------------------------------- pages
 
 -- The clock is not an engine group -- norns owns it -- but it reads and turns
--- like one, so it gets a page of the same shape.
-local clock_page = { name = "CLOCK", p = {
+-- like one, so it sits in a page of the same shape. Tempo and key are the two
+-- things that are true of the whole song rather than of a track, so they share
+-- it rather than each having a page with one cell on it.
+local song_page = { name = "SONG", p = {
   { param = "clock_tempo", name = "BPM", spec = { minval = 20, maxval = 300 }, g = "bar" },
 }}
+for _, e in ipairs(M.groups.key.p) do table.insert(song_page.p, e) end
 
 -- SEND FX is a shortcut, not a fourth copy of anything: it points at the same
 -- params the full pages hold, two of each, under labels that say which effect
@@ -151,7 +177,7 @@ M.pages = {
   { name = "MIX",     kind = "mix" },
   { name = "COLOUR",  kind = "params", p = M.groups.col.p },
   { name = "SEND FX", kind = "params", p = sendfx },
-  { name = "CLOCK",   kind = "params", p = clock_page.p },
+  { name = "SONG",    kind = "params", p = song_page.p },
   { name = "CHORUS",  kind = "params", p = M.groups.cho.p },
   { name = "DELAY",   kind = "params", p = M.groups.dly.p },
   { name = "REVERB",  kind = "params", p = M.groups.rev.p },
@@ -176,26 +202,73 @@ end
 
 -- ------------------------------------------------------------------ values
 
--- params:string is the formatted, unit-carrying readout norns already keeps
-function M.text(e)
-  local ok, s = pcall(function() return params:string(e.param) end)
-  if ok and type(s) == "string" and #s > 0 then return s end
-  local v = params:get(e.param)
-  if type(v) == "number" then
-    return (v == math.floor(v)) and string.format("%d", v) or string.format("%.2f", v)
-  end
-  return "-"
+-- a param read that survives being called before build_params has run
+local function pget(id, dflt)
+  local ok, v = pcall(function() return params:get(id) end)
+  return (ok and type(v) == "number") and v or dflt
 end
 
--- 0..1 position inside the spec, for the glyph. Monotonic on an exp warp
--- rather than exact, which is all a 28px picture needs.
+-- params:string is the formatted, unit-carrying readout norns already keeps.
+-- A cell is 32px wide, which is about six characters, so a long scale name is
+-- cut rather than allowed to run into the cell beside it.
+local MAXTEXT = 6
+
+function M.text(e)
+  local ok, s = pcall(function() return params:string(e.param) end)
+  if not (ok and type(s) == "string" and #s > 0) then
+    local v = params:get(e.param)
+    if type(v) ~= "number" then return "-" end
+    s = (v == math.floor(v)) and string.format("%d", v)
+                             or string.format("%.2f", v)
+  end
+  return (#s > MAXTEXT) and s:sub(1, MAXTEXT) or s
+end
+
+-- 0..1 position inside the spec, for the glyph.
 function M.norm(e)
+  if e.opts then
+    local n = #e.opts
+    if n < 2 then return 0 end
+    return util.clamp((pget(e.param, 1) - 1) / (n - 1), 0, 1)
+  end
   local sp = e.spec
   local v = params:get(e.param)
   if not (sp and type(v) == "number") then return 0 end
+  -- a controlspec knows its own warp, and unmap is the position it maps from.
+  -- Reading an exp control linearly crowded everything musical into the first
+  -- couple of pixels -- a 375ms delay sat at 9% of a cell that reaches 4s.
+  if sp.unmap then
+    local ok, u = pcall(function() return sp:unmap(v) end)
+    if ok and type(u) == "number" then return util.clamp(u, 0, 1) end
+  end
   local lo, hi = sp.minval or 0, sp.maxval or 1
   if hi == lo then return 0 end
   return util.clamp((v - lo) / (hi - lo), 0, 1)
 end
+
+-- what a glyph needs beyond the number. SCALE draws the notes the scale
+-- actually contains, which is in musicutil rather than in the param.
+function M.glyph_extra(e)
+  if e.id == "scale" then
+    local sc = musicutil.SCALES[M.scale_index()]
+    return { intervals = sc and sc.intervals }
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------- the key
+--
+-- One scale and one root for the whole song. The sequencers read these when
+-- they resolve a step, and the grid keyboard reads them to lay itself out.
+
+function M.root()
+  return util.clamp(util.round(pget("key_root", 1)), 1, 12) - 1
+end
+
+function M.scale_index()
+  return util.clamp(util.round(pget("key_scale", 1)), 1, #SCALE_NAMES)
+end
+
+function M.scale_name() return SCALE_NAMES[M.scale_index()] end
 
 return M

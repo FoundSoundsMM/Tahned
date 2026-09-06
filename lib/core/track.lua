@@ -177,13 +177,19 @@ end
 
 -- ------------------------------------------------------------------- notes
 
+-- When the track last made a sound. The screen reads it so an envelope run
+-- can pulse on the trigger: a page with an envelope on it has a heartbeat
+-- while the sequencer is playing, rather than being a still picture of a
+-- shape that is in fact being fired eight times a bar.
 function Track:trig(vel, note)
   if self.mute then return end
+  self.last_trig = util.time()
   engine.trig(self.idx - 1, vel or 1, note or 36)
 end
 
 function Track:note_on(id, note, vel)
   if self.mute then return end
+  self.last_trig = util.time()
   engine.noteOn(self.idx - 1, id, musicutil.note_num_to_freq(note), vel or 1)
 end
 

@@ -10,6 +10,7 @@
 -- falls back to the track's sequencer settings.
 
 local C = include("tahned/lib/instruments/common")
+local M = include("tahned/lib/core/master")
 local musicutil = require "musicutil"
 
 local Seq = {}
@@ -63,8 +64,14 @@ function Seq:step_beats(speed)
   return (4 / self:tsig().den) * 0.25 / sp
 end
 
--- how many steps fill one bar of this track's signature; the grid lights the
--- first of every one of them so the bar lines are visible on the pads
+-- How often the pads and the screen put a marker under the pattern. This is
+-- deliberately not the bar length: at 4/4 x1 a bar is sixteen steps, so a
+-- sixteen step pattern got exactly one marker at step 1 and the counting the
+-- marks exist for never happened. Every fourth step is the ruler you actually
+-- read a pattern against, whatever metre the track is in.
+function Seq:mark_steps() return 4 end
+
+-- how many steps fill one bar of this track's signature
 function Seq:bar_steps()
   local sp = C.SPEEDS[(self.s.speed or 5) + 1] or 1
   return math.max(1, util.round(self:tsig().num * sp * 4))
@@ -267,14 +274,15 @@ local CHORD_IV = C.CHORD_IV
 -- two modules that include this one hold different Seq tables. The track
 -- registry therefore lives on the instance, set by state.init.
 
+-- The key is the song's, not the track's: root and scale come off the master's
+-- SONG page. The octave stays here, because which register a track plays in is
+-- the one part of this that really is per track.
 function Seq:root_note()
-  return (self.s.root or 0) + ((self.s.octave or 3) * 12)
+  return M.root() + ((self.s.octave or 3) * 12)
 end
 
 function Seq:scale_array()
-  local list = musicutil.SCALES
-  local sc = list[util.clamp(self.s.scale or 1, 1, #list)]
-  return musicutil.generate_scale(self.s.root or 0, sc.name, 10)
+  return musicutil.generate_scale(M.root(), M.scale_name(), 10)
 end
 
 function Seq:leader()

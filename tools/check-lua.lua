@@ -454,8 +454,10 @@ check("keyboard notes survive a scale change while held", function()
   -- hold a keyboard pad, change the scale under it, then let go
   G.g.key(3, 6, 1)
   assert(voice_count() == before + 1, "keyboard pad did not sound")
-  sq.s.scale = (sq.s.scale or 1) + 3
-  sq.s.root = ((sq.s.root or 0) + 5) % 12
+  -- the key is global now, so the change comes from the master's SONG page
+  -- rather than from this track's own settings
+  params:set("key_scale", (params:get("key_scale") or 1) + 3)
+  params:set("key_root", ((params:get("key_root") or 1) + 5 - 1) % 12 + 1)
   G.g.key(3, 6, 0)
   assert(voice_count() == before, "note left hanging after a scale change")
 
@@ -554,6 +556,7 @@ check("a time signature scales the step and groups the bar", function()
   sq.s.speed, sq.s.tsig = 5, 0                 -- x1, 4/4
   assert(math.abs(sq:step_beats() - 0.25) < 1e-9, "4/4 x1 is not a 16th")
   assert(sq:bar_steps() == 16, "4/4 x1 bar is " .. sq:bar_steps() .. ", want 16")
+  assert(sq:mark_steps() == 4, "the pattern marker is not every fourth step")
   sq.s.tsig = 9                                -- 7/8
   assert(math.abs(sq:step_beats() - 0.125) < 1e-9,
     "7/8 did not halve the step: " .. sq:step_beats())

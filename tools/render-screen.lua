@@ -148,6 +148,10 @@ print("rendering " .. OUT)
 
 -- Drums  1 MIX  2 SEQ  3 STEP  4 SYNTH  5 FILTER  6..9 LFO
 shot("00-mix",        "KICK / MIX",     1, 1, 3)
+-- MACH draws the machine, so the cell only reads if the set is seen together
+shot("00b-mix-hat",   "HAT / MIX",      3, 1, 1)
+shot("00c-mix-cymb",  "CYMB / MIX",     5, 1, 1)
+shot("00d-mix-tone",  "TONE / MIX",     6, 1, 1)
 shot("01-kick",       "KICK / SYNTH",   1, 4, 2)
 shot("02-snare",      "SNARE / SYNTH",  2, 4, 2, function(t)
   dial(t, 4, 3, 70); dial(t, 4, 7, 40)
@@ -171,9 +175,9 @@ shot("10-tone-ampeg", "TONE / AMP EG",  6, 7, 2)
 shot("10b-tone-modeg","TONE / MOD EG",  6, 8, 1, function(t)
   dial(t, 8, 6, 40); dial(t, 8, 7, 4); dial(t, 8, 8, -30)
 end)
-shot("11-tone-harm",  "TONE / HARMONY", 6, 4, 4, function(t)
+shot("11-tone-harm",  "TONE / HARMONY", 6, 4, 2, function(t)
   local sq = t:seq()
-  sq.s.chord = 11; sq.s.scale = 3; sq.s.invert = 1
+  sq.s.chord = 11; sq.s.invert = 1
 end)
 
 -- every algorithm, to check the routing glyph against the engine's tables
@@ -221,8 +225,17 @@ end
 -- the master: its own page set, K2+K3 to reach it
 do
   local names = { "OVER", "PERFORM", "MIX", "COLOUR", "SEND FX",
-                  "CLOCK", "CHORUS", "DELAY", "REVERB" }
+                  "SONG", "CHORUS", "DELAY", "REVERB" }
   state.mode = "master"
+  -- COLOUR ships at zero all the way across, which draws eight cells of
+  -- nothing happening; give it a setting so each glyph has a value to be
+  for id, v in pairs({ col_crush = 0.35, col_wow = 0.4, col_wrate = 0.3,
+                       col_saturn = 0.5, col_tilt = 0.35, col_loss = 0.55,
+                       col_glitch = 0.4, col_comp = 0.45 }) do
+    params:set(id, v)
+  end
+  params:set("key_root", 8)          -- G
+  params:set("key_scale", 2)         -- natural minor
   state.tracks[2]:set_machine(2)
   state.tracks[3]:set_machine(3)
   state.tracks[4]:set_machine(6)

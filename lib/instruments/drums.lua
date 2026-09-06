@@ -20,11 +20,11 @@ local S = include("tahned/lib/core/spec")
 local kick = {
   id = "kick", name = "KICK", short = "KCK", seq = "drum",
   pages = { { name = "SYNTH", params = {
-    S.c(8,  "TUNE",   { min = -24, max = 24, def = -5, g = "bi", unit = "st" }),
+    S.c(8,  "TUNE",   { min = -24, max = 24, def = -5, g = "tune", unit = "st" }),
     S.b(9,  "SWEEP",  { def = 31, g = "sweep" }),
-    S.c(10, "S.TIME", { def = 72, g = "rel" }),   -- ~150ms: an 808 glide
+    S.c(10, "S.TIME", { def = 72, g = "ptime" }), -- ~150ms: an 808 glide
     S.c(11, "DECAY",  { def = 85, g = "rel" }),
-    S.c(12, "FM",     { def = 0 }),
+    S.c(12, "FM",     { def = 0, g = "fm" }),
     S.e(13, "RATIO",  S.RATIOS, { def = 3, g = "ratio" }),
     S.c(14, "CLICK",  { def = 20, g = "click" }),
     S.c(15, "PUNCH",  { def = 30, g = "sat" }),
@@ -38,9 +38,9 @@ local kick = {
 local snare = {
   id = "snare", name = "SNARE", short = "SNR", seq = "drum",
   pages = { { name = "SYNTH", params = {
-    S.c(8,  "TUNE",   { min = -24, max = 24, def = 2, g = "bi", unit = "st" }),
-    S.c(9,  "SNAP",   { def = 64, g = "noise" }),
-    S.c(10, "FM",     { def = 30 }),
+    S.c(8,  "TUNE",   { min = -24, max = 24, def = 2, g = "tune", unit = "st" }),
+    S.c(9,  "SNAP",   { def = 64, g = "snap" }),
+    S.c(10, "FM",     { def = 30, g = "fm" }),
     S.e(11, "RATIO",  S.RATIOS, { def = 8, g = "ratio" }),
     S.c(12, "B.DEC",  { def = 45, g = "rel" }),
     S.c(13, "N.DEC",  { def = 70, g = "rel" }),
@@ -56,12 +56,12 @@ local snare = {
 local hat = {
   id = "hat", name = "HAT", short = "HAT", seq = "drum",
   pages = { { name = "SYNTH", params = {
-    S.c(8,  "TUNE",   { min = -24, max = 24, def = 0, g = "bi", unit = "st" }),
+    S.c(8,  "TUNE",   { min = -24, max = 24, def = 0, g = "tune", unit = "st" }),
     S.c(9,  "SPREAD", { def = 60, g = "spectrum" }),
-    S.c(10, "FM",     { def = 45 }),
+    S.c(10, "FM",     { def = 45, g = "fm" }),
     S.c(11, "DECAY",  { def = 45, g = "rel" }),
     S.c(12, "TONE",   { def = 80, g = "band" }),
-    S.c(13, "RES",    { def = 30 }),
+    S.c(13, "RES",    { def = 30, g = "res" }),
     S.c(14, "NOISE",  { def = 20, g = "noise" }),
     S.c(15, "OPEN",   { def = 0,  g = "hold" }),
   }} },
@@ -72,11 +72,11 @@ local hat = {
 local tom = {
   id = "tom", name = "TOM", short = "TOM", seq = "drum",
   pages = { { name = "SYNTH", params = {
-    S.c(8,  "TUNE",   { min = -24, max = 24, def = 7, g = "bi", unit = "st" }),
+    S.c(8,  "TUNE",   { min = -24, max = 24, def = 7, g = "tune", unit = "st" }),
     S.b(9,  "BEND",   { def = 25, g = "sweep" }),
-    S.c(10, "B.TIME", { def = 45, g = "rel" }),
+    S.c(10, "B.TIME", { def = 45, g = "ptime" }),
     S.c(11, "DECAY",  { def = 75, g = "rel" }),
-    S.c(12, "FM",     { def = 18 }),
+    S.c(12, "FM",     { def = 18, g = "fm" }),
     S.e(13, "RATIO",  S.RATIOS, { def = 5, g = "ratio" }),
     S.c(14, "SKIN",   { def = 25, g = "noise" }),
     S.c(15, "WOOD",   { def = 30, g = "spectrum" }),
@@ -88,9 +88,9 @@ local tom = {
 local cymb = {
   id = "cymb", name = "CYMB", short = "CYM", seq = "drum",
   pages = { { name = "SYNTH", params = {
-    S.c(8,  "TUNE",   { min = -24, max = 24, def = 0, g = "bi", unit = "st" }),
+    S.c(8,  "TUNE",   { min = -24, max = 24, def = 0, g = "tune", unit = "st" }),
     S.c(9,  "SPREAD", { def = 80, g = "spectrum" }),
-    S.c(10, "FM",     { def = 70 }),
+    S.c(10, "FM",     { def = 70, g = "fm" }),
     S.c(11, "DECAY",  { def = 85, g = "rel" }),
     S.c(12, "TONE",   { def = 70, g = "band" }),
     S.c(13, "SIZZLE", { def = 50, g = "noise" }),

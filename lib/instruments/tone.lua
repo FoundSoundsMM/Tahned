@@ -27,8 +27,8 @@ return {
       S.e(10, "RAT 2", S.MULTS, { def = 3, g = "ratio" }),
       S.e(11, "RAT 3", S.MULTS, { def = 6, g = "ratio" }),
       S.e(12, "RAT 4", S.MULTS, { def = 6, g = "ratio" }),
-      S.c(13, "FDBK",   { min = 0, max = 7, def = 0 }),   -- 3 bit on the chip
-      S.b(14, "DETUNE", { def = 0 }),
+      S.c(13, "FDBK",   { min = 0, max = 7, def = 0, g = "fbkwave" }),  -- 3 bit
+      S.b(14, "DETUNE", { def = 0, g = "beat" }),
       S.b(15, "FINE",   { def = 0 }),
     }},
     { name = "OPS", params = {
@@ -38,7 +38,7 @@ return {
       S.c(19, "LVL 4", { min = 0, max = 63, def = 0 }),    -- 6 bit
       S.e(20, "WAVE C", S.WAVES, { g = "wave" }),
       S.e(21, "WAVE M", S.WAVES, { g = "wave" }),
-      S.c(22, "INDEX", { def = 40 }),
+      S.c(22, "INDEX", { def = 40, g = "fm" }),
       S.c(23, "FOLD",  { def = 0, g = "fold" }),
     }},
     -- CYCLE is one control over both envelopes rather than a LOOP switch on

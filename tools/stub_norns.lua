@@ -55,19 +55,46 @@ return function(ROOT, screen_impl)
   stats.coros = coros
 
   metro = { init = function(f) return { start = function() end, stop = function() end, f = f } end }
-  controlspec = { new = function(a, b, c, d, e) return { minval = a, maxval = b, default = e or a } end }
 
-  local actions, val, spec = {}, { clock_tempo = 120 }, {}
+  -- enough controlspec to be normalised: unmap is what the master glyphs read
+  -- so an exp control draws where it actually sits rather than linearly
+  controlspec = { new = function(a, b, warp, d, e)
+    return {
+      minval = a, maxval = b, warp = warp or "lin", default = e or a,
+      unmap = function(self, v)
+        if self.maxval == self.minval then return 0 end
+        if self.warp == "exp" and self.minval > 0 and v > 0 then
+          return math.log(v / self.minval) / math.log(self.maxval / self.minval)
+        end
+        return (v - self.minval) / (self.maxval - self.minval)
+      end,
+    }
+  end }
+
+  local actions, val, spec, opts = {}, { clock_tempo = 120 }, {}, {}
   params = setmetatable({
     add_control = function(_, id, _, sp)
       spec[id] = sp
       val[id] = sp and sp.default or 0
     end,
+    add_option = function(_, id, _, list, def)
+      opts[id] = list
+      val[id] = def or 1
+    end,
     set_action = function(_, id, f) actions[id] = f end,
     get = function(_, id) return val[id] end,
     set = function(_, id, v) val[id] = v end,
-    string = function(_, id) return string.format("%.2f", val[id] or 0) end,
+    string = function(_, id)
+      local o = opts[id]
+      if o then return o[val[id] or 1] or "-" end
+      return string.format("%.2f", val[id] or 0)
+    end,
     delta = function(_, id, d)
+      local o = opts[id]
+      if o then
+        val[id] = math.min(math.max((val[id] or 1) + d, 1), #o)
+        return
+      end
       local sp = spec[id]
       local lo, hi = sp and sp.minval or 20, sp and sp.maxval or 300
       val[id] = math.min(math.max((val[id] or lo) + (d * (hi - lo) / 100), lo), hi)
@@ -78,10 +105,21 @@ return function(ROOT, screen_impl)
   norns = { state = { data = "/tmp/", path = ROOT, shortname = "tahned" } }
   tab = { save = function() end, load = function() return nil end }
 
+  -- intervals as well as names: the SCALE glyph draws the notes the scale
+  -- actually contains, so a stub without them would draw an empty cell
   local SCALES = {}
-  for _, n in ipairs({ "Major", "Natural Minor", "Dorian", "Phrygian", "Lydian",
-                       "Mixolydian", "Locrian", "Whole Tone", "Major Pentatonic" }) do
-    table.insert(SCALES, { name = n })
+  for _, e in ipairs({
+    { "Major",           { 0, 2, 4, 5, 7, 9, 11 } },
+    { "Natural Minor",   { 0, 2, 3, 5, 7, 8, 10 } },
+    { "Dorian",          { 0, 2, 3, 5, 7, 9, 10 } },
+    { "Phrygian",        { 0, 1, 3, 5, 7, 8, 10 } },
+    { "Lydian",          { 0, 2, 4, 6, 7, 9, 11 } },
+    { "Mixolydian",      { 0, 2, 4, 5, 7, 9, 10 } },
+    { "Locrian",         { 0, 1, 3, 5, 6, 8, 10 } },
+    { "Whole Tone",      { 0, 2, 4, 6, 8, 10 } },
+    { "Major Pentatonic",{ 0, 2, 4, 7, 9 } },
+  }) do
+    table.insert(SCALES, { name = e[1], intervals = e[2] })
   end
   package.preload["musicutil"] = function()
     return {

@@ -44,8 +44,13 @@ Every track has, in order:
    probability, and ratchet (drums) or strum (TONE)
 3. **STEP** — what one step does with the time it gets: `HOLD` and `HTYPE`,
    plus a note offset (drums) or the gate length (TONE)
-4. **the machine's own pages** — one for each drum, TONE gets HARMONY plus four
-5. **FILTER** — type (LP / BP / HP / comb), cutoff, res, envelope, keytrack, drive
+4. **the machine's own pages** — one for each drum, TONE gets HARMONY plus four.
+   HARMONY is the track's own voicing — octave, chord, inversion, spread, and
+   who it follows. The key it voices *in* is not here: root and scale are the
+   song's, on the master's SONG page
+5. **FILTER** — type (LP / BP / HP / comb), cutoff, res, envelope, keytrack, drive.
+   `TYPE` draws the shape of the type and nothing else; the resonant peak
+   belongs to `RES`, which has a cell of its own
 6. **LFO 1–4** — speed, multiplier, wave, mode, and **two destinations each**
 
 which is nine pages for a drum and thirteen for TONE. COLOUR is not among them
@@ -63,7 +68,50 @@ longer one is ever added.
 ### What a cell draws
 
 Every cell carries a small picture of its value rather than a generic bar, so
-a page reads as a picture of the sound. Two of them are not per cell at all:
+a page reads as a picture of the sound. There are no blank cells and no
+placeholder bars: a control with nothing to draw was a control you had to
+read the number of.
+
+The pictures are built out of the same four parts, so eight cells read as one
+page rather than as eight drawings that happen to share a screen:
+
+| | |
+|---|---|
+| **ground** | a magnitude sits on the bottom row of its box and is read upward from it |
+| **axis** | something bipolar, or a waveform, is read about the centre line instead, with a detent on the centre |
+| **ghost** | the travel a control has *and has not* used, drawn dim under the value. Nothing is ever a lone mark with no scale behind it — you can always see how much of the range is left |
+| **value** | the part that is true right now, at the level of the cell: brighter under the cursor |
+
+A glyph never draws outside its box and never draws a second picture of the
+cell beside it — `TYPE` has the filter's shape, `CUTOFF` has where the corner
+is, `RES` has the peak, and none of the three repeats either of the others.
+Where two controls really are the same kind of thing — four operator levels,
+three send levels — they really do draw the same shape, because saying
+otherwise would be a lie for the sake of variety.
+
+Some of what that gets you:
+
+- **a ratio is drawn as the two things it is a ratio between**, in two lanes:
+  the modulator on top at the ratio the list holds, the carrier under it at
+  one cycle. A ratio below one is a modulator slower than its carrier and
+  looks it.
+- **`SWEEP` and `S.TIME` are one glide between them.** `SWEEP` puts the
+  settled note where the excursion has room to show — low for a pitch falling
+  onto it, high for one rising — with the dotted line at the far edge as full
+  depth. `S.TIME` is the same glide with the stretch of time it takes marked
+  underneath, so it is a duration rather than a second amplitude curve.
+- **an enum is drawn as its choices**: one slot a value, the one selected
+  standing up out of the row, so `MULT`, `MODE`, `CYCLE`, `FOLLOW`, `LEADER`,
+  `INVERT` and the rest all read as "third of eight" without counting.
+- **`MACH` draws the machine** — where that drum puts its energy and for how
+  long — rather than leaving the one cell that decides what the track *is*
+  empty.
+- **an LFO destination draws the patch**: the LFO, the arrow, and something on
+  the end of it, or a broken arrow when there is nothing there. Which
+  destination it is is spelled out underneath; whether this half of the LFO is
+  patched at all is the thing you cannot otherwise see at a glance.
+
+Two of them are not per cell at all:
 
 - **envelopes are drawn once, across all of their cells.** An envelope
   generator is one shape, not four unrelated pictures of four numbers, so
@@ -77,6 +125,32 @@ a page reads as a picture of the sound. Two of them are not per cell at all:
   showing a number beside a generic sine. The window is a fixed two seconds,
   so a faster LFO fits more cycles into the same box. It shares its shapes and
   its rate formula with the engine, so what is drawn is what is running.
+
+### What moves
+
+Three things, and nothing else — a page that animates everywhere is a page
+you cannot read:
+
+- **the LFO scope**, always. A page called LFO whose speed cell sits still is
+  not showing you the speed.
+- **a field of noise**, but only while the cursor is on it. `SNAP`, `NOISE`,
+  `SIZZLE`, `SKIN`, `N.TONE`, `GLITCH`, `LOSS` and `WOW` are fields rather
+  than shapes, and a field has something to say by moving. Motion everywhere
+  at once is noise; motion on the one cell you are turning is feedback.
+- **an envelope run**, which lifts on the trigger and falls back over about a
+  fifth of a second, so a page with an envelope on it has a pulse while the
+  sequencer is playing rather than being a still picture of a shape that is in
+  fact being fired eight times a bar.
+
+The screen metro only redraws while something is actually moving, so a still
+page costs nothing.
+
+`tools/render-screen.lua` draws every page to SVG with the script's own
+drawing code, which is how the set is judged without hardware:
+
+```bash
+lua tools/render-screen.lua preview
+```
 
 ### Macros
 
@@ -140,7 +214,7 @@ page.
 | 3 **MIX** | the eight track levels as faders. It is the same channel each track's own MIX page turns |
 | 4 **COLOUR** | `CRUSH WOW W.RATE SATURN TILT LOSS GLITCH COMP` |
 | 5 **SEND FX** | two controls each for the reverb, the delay, the chorus and the master drive |
-| 6 **CLOCK** | tempo |
+| 6 **SONG** | tempo, and the key everything plays in — `BPM ROOT SCALE` |
 | 7–9 | chorus, delay and reverb in full |
 
 Everything from PERFORM on is a norns param, so it saves with the PSET and
@@ -207,7 +281,7 @@ The lighting is a ladder, so a pattern reads without counting pads:
 |---|---|
 | dark | past the end of the sequence — **the length is visible on the pads** |
 | faint | inside the sequence and empty: the floor the pattern sits on |
-| a little brighter | the first step of a bar, from the track's own time signature |
+| a little brighter | every fourth step — the ruler a pattern is counted against |
 | brighter | the playhead |
 | brightest | a written step, scaled by its velocity, and brightest of all with the playhead on it |
 
@@ -217,7 +291,12 @@ Every sequencer carries its own **TSIG**, from `2/4` through `7/8` to `5/16`.
 The denominator is the beat unit and it scales the step — `SPEED` counts steps
 per beat unit either way, so a `/8` track runs at half the step length of a
 `/4` one and the two pull against each other. The numerator groups those steps
-into bars, which is where the grid's bar lights come from.
+into bars, which is what the sequencer counts against the clock.
+
+The pads and the screen do not mark those bars. At `4/4 x1` a bar is sixteen
+steps, so a sixteen step pattern got one marker at step 1 and the counting the
+marks exist for never happened. Every fourth step is marked instead, whatever
+metre the track is in.
 
 A track left in `4/4` runs exactly as it always did, so nothing that never
 touches this moves. Eight tracks each in their own metre is the point: a
@@ -237,10 +316,20 @@ leader's transposition (`DEGREE`), snap every note into the chord the leader is
 currently sounding (`VOICE`), or play the leader's root in its own register
 (`BASS`).
 
+Both tracks are reading the same root and scale while they do it. The key is
+one setting on the master's SONG page rather than a copy per track — eight
+tracks in eight different scales was never a thing anybody reached for, and a
+follower in a different scale from its leader is simply wrong.
+
 ## Effects
 
 Three sends — chorus, delay, and a reverb with pitch-shifted feedback for
 shimmer — plus one **colour chain across the whole mix**, the sends included.
+
+The delay's two cut controls were labelled the wrong way round against the
+engine — its high-pass, which is the one that removes lows, was called
+`HICUT` — so they are `LOCUT` and `HICUT` the way every other delay names
+them, and each draws the shelf it actually is.
 
 On the reverb, **SIZE** sets the tail on its own and **SHIM FBK** regenerates
 only the pitch-shifted path. They are deliberately not the same control: a
@@ -375,6 +464,14 @@ rings for two seconds is not a kit. KICK is held to the 808: 49 Hz, gone by
 about six tenths. It also asks whether SWEEP bends the pitch at all, and
 whether a held TONE note follows a ratio turned under it. A control that looks
 like a control and does nothing is exactly what this exists to catch.
+
+The kick's `SWEEP` and `S.TIME` were caught by it twice. The check passing is
+not the same as the pair being worth turning: the time ran 2ms to 600ms on an
+exponential, so the whole bottom half of `S.TIME` was under 20ms — one cycle at
+the pitch a kick lands on, heard as a click rather than as a pitch moving — and
+the depth reached four octaves, so the downward half of `SWEEP` started at 3 Hz
+and the front of the hit was simply missing. It is 10ms to 1.2s over three
+octaves now, and both halves of both knobs do something across their travel.
 
 ```bash
 lua tools/render-screen.lua preview   # then open preview/index.html

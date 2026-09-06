@@ -81,7 +81,7 @@ C.mix = { name = "MIX", params = {
     min = 0, max = #S.MACHINE - 1, def = 0 },
   S.c(0, "LEVEL",  { def = 100 }),
   S.b(1, "PAN",    { def = 0, g = "pan" }),
-  S.c(2, "DRIVE",  { def = 0 }),
+  S.c(2, "DRIVE",  { def = 0, g = "sat" }),
   S.c(3, "CHORUS", { def = 0, g = "send" }),
   S.c(4, "DELAY",  { def = 0, g = "send" }),
   S.c(5, "REVERB", { def = 0, g = "send" }),
@@ -90,13 +90,15 @@ C.mix = { name = "MIX", params = {
 C.filter = { name = "FILTER", env = { at = 5, segs = { "atk", "dec" } }, params = {
   { k = "ftype", ch = 40, name = "TYPE", g = "ftype",
     opts = S.FILTERS, min = 0, max = 3, def = 0 },
-  S.c(41, "CUTOFF", { def = 127, g = "filt" }),
-  S.c(42, "RES",    { def = 0 }),
+  -- a plain level, the way RES and ENV beside it are plain: the response
+  -- curve belongs to TYPE, and drawing it here twice told you nothing twice
+  S.c(41, "CUTOFF", { def = 127, g = "cutoff" }),
+  S.c(42, "RES",    { def = 0,   g = "res" }),
   S.b(43, "ENV",    { def = 0, g = "sweep" }),
   S.c(44, "ATK",    { def = 0,  g = "atk" }),
   S.c(45, "DEC",    { def = 60, g = "rel" }),
-  S.c(46, "KTRK",   { def = 0 }),
-  S.c(47, "DRIVE",  { def = 0 }),
+  S.c(46, "KTRK",   { def = 0, g = "ktrk" }),
+  S.c(47, "DRIVE",  { def = 0, g = "sat" }),
 }}
 
 -- four LFOs, two destinations each
@@ -118,7 +120,7 @@ end
 -- ------------------------------------------------------------- seq pages
 
 local function speed_spec()
-  return S.seq("speed", "SPEED", { opts = C.SPEED_NAMES, def = 5 })
+  return S.seq("speed", "SPEED", { opts = C.SPEED_NAMES, def = 5, g = "pulse" })
 end
 
 local function shared_seq(maxlen, deflen)
@@ -126,10 +128,10 @@ local function shared_seq(maxlen, deflen)
     S.seq("length", "LENGTH", { min = 1, max = maxlen, def = deflen, g = "len" }),
     speed_spec(),
     S.seq("tsig",   "TSIG",   { opts = C.TSIG_NAMES, def = 0, g = "tsig" }),
-    S.seq("swing",  "SWING",  { min = -50, max = 50, def = 0, g = "bi" }),
+    S.seq("swing",  "SWING",  { min = -50, max = 50, def = 0, g = "swing" }),
     S.seq("dir",    "DIR",    { opts = S.DIRS, g = "dir" }),
     S.seq("rotate", "ROTATE", { min = -64, max = 64, def = 0, g = "bi" }),
-    S.seq("prob",   "PROB",   { min = 0, max = 100, def = 100, g = "bar" }),
+    S.seq("prob",   "PROB",   { min = 0, max = 100, def = 100, g = "prob" }),
   }
 end
 
@@ -160,7 +162,7 @@ C.seqpage.drum = {
     local p = hold_pair()
     -- a drum step has always carried a note offset; until now nothing could
     -- write one, and it is per step by nature, so it belongs here
-    p[3] = S.seq("note", "NOTE", { min = -24, max = 24, def = 0, g = "bi",
+    p[3] = S.seq("note", "NOTE", { min = -24, max = 24, def = 0, g = "tune",
                                    lock = true })
     return p
   end)() },
@@ -169,26 +171,31 @@ C.seqpage.drum = {
 C.seqpage.tone = {
   { name = "SEQ", params = (function()
     local p = shared_seq(64, 16)
-    p[8] = S.seq("strum", "STRUM", { min = 0, max = 100, def = 0, g = "bar" })
+    p[8] = S.seq("strum", "STRUM", { min = 0, max = 100, def = 0, g = "strum" })
     return p
   end)() },
   { name = "STEP", params = (function()
     local p = hold_pair()
     -- how long the note lasts is about the step rather than the pattern, and
     -- it locks per step, so it belongs here beside the stage controls
-    p[3] = S.seq("gate", "GATE", { min = 1, max = 200, def = 50, g = "bar" })
+    p[3] = S.seq("gate", "GATE", { min = 1, max = 200, def = 50, g = "gate" })
     return p
   end)() },
   -- LEADER sat on the SEQ page and FOLLOW on this one, which are two halves
   -- of one decision; they are next to each other now.
+  -- ROOT and SCALE are not here any more. A key is the song's, not a track's:
+  -- eight tracks in eight different scales is not a feature anybody reached
+  -- for, and a follower in a different scale from its leader is simply wrong.
+  -- They sit on the master's SONG page next to the tempo. What is left is the
+  -- part that really is per track -- which register it plays in, and how it
+  -- voices and follows inside the key everything shares.
   { name = "HARMONY", params = {
-    S.seq("root",   "ROOT",   { opts = C.NOTE_NAMES, def = 0 }),
-    S.seq("octave", "OCT",    { min = 1, max = 7, def = 3 }),
-    S.seq("scale",  "SCALE",  { min = 1, max = 40, def = 1, g = "scale" }),
+    S.seq("octave", "OCT",    { min = 1, max = 7, def = 3, g = "octave" }),
     S.seq("chord",  "CHORD",  { opts = C.CHORDS, def = 0, g = "chord" }),
-    S.seq("invert", "INVERT", { min = -3, max = 3, def = 0, g = "bi" }),
-    S.seq("spread", "SPREAD", { min = 0, max = 3, def = 0 }),
-    S.seq("follow", "FOLLOW", { opts = {"OFF","DEGREE","VOICE","BASS"}, def = 1 }),
+    S.seq("invert", "INVERT", { min = -3, max = 3, def = 0, g = "ladder" }),
+    S.seq("spread", "SPREAD", { min = 0, max = 3, def = 0, g = "ladder" }),
+    S.seq("follow", "FOLLOW", { opts = {"OFF","DEGREE","VOICE","BASS"}, def = 1,
+                                g = "ladder" }),
     S.seq("leader", "LEADER", { opts = {"-","T1","T2","T3","T4","T5","T6","T7","T8"},
                                 g = "leader" }),
   }},

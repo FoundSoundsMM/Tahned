@@ -8,14 +8,27 @@ local S = include("tahned/lib/core/spec")
 local W = include("tahned/lib/ui/widgets")
 local C = include("tahned/lib/instruments/common")
 local M = include("tahned/lib/core/master")
-local musicutil = require "musicutil"
 
 local P = {}
 
--- Set while a page has a cell that moves on its own -- the LFO scope. The
--- screen metro reads it, so an animated page keeps redrawing and a still one
--- costs nothing.
+-- Set while a page has something moving on it -- the LFO scope, a noise
+-- field under the cursor, an envelope still lit from a trigger. The screen
+-- metro reads it, so an animated page keeps redrawing and a still one costs
+-- nothing.
 P.anim = false
+
+-- Glyphs that are a field rather than a shape, and so have something to say
+-- by moving. They move only while the cursor is on them: motion everywhere
+-- at once is noise, motion on the one cell you are turning is feedback.
+local LIVE = {
+  noise = true, ntone = true, snap = true,
+  glitch = true, loss = true, wow = true,
+}
+
+-- how long an envelope stays lit after the track sounds
+local PULSE = 0.22
+
+local now = 0
 
 local CW, CH = 32, 26
 local TOP = 8
@@ -38,26 +51,23 @@ local function value_text(track, sp, v)
     local d = i and track.dests[i]
     return d and d.name or "-"
   end
-  if sp.id == "scale" then
-    local sc = musicutil.SCALES[util.clamp(v, 1, #musicutil.SCALES)]
-    return sc and sc.name:sub(1, 6) or "-"
-  end
   if sp.id == "speed" then return C.SPEED_NAMES[v + 1] or "-" end
   return S.text(sp, v)
 end
 
 -- ---------------------------------------------------------------- cells
 
-local function glyph_extra(track, sp)
-  if sp.g == "filt" then return track:raw(40) end
+local function glyph_extra(track, sp, selected)
   if sp.g == "lfoscope" then
     -- the scope needs the rest of its own LFO: the wave to draw and the
     -- multiplier that, with SPD and the tempo, sets how fast it runs
     P.anim = true
     return { wave = track:raw(sp.ch + 2), mult = track:raw(sp.ch + 1),
-             bpm = clock.get_tempo(), now = util.time() }
+             bpm = clock.get_tempo(), now = now, live = true }
   end
-  return nil
+  local live = selected and LIVE[sp.g] or false
+  if live then P.anim = true end
+  return { now = now, live = live }
 end
 
 local function draw_cell(track, sp, i, selected, lockv, noglyph, holding)
@@ -87,7 +97,7 @@ local function draw_cell(track, sp, i, selected, lockv, noglyph, holding)
       W.strike(x + 2, y + 9, CW - 6, 9)
     else
       W.draw(sp.g or "bar", x + 2, y + 9, CW - 6, 9, sp, v,
-        selected and 15 or 9, glyph_extra(track, sp))
+        selected and 15 or 9, glyph_extra(track, sp, selected))
     end
   end
 
@@ -119,7 +129,14 @@ local function draw_env(state, track, page)
   local x, y = cell_xy(e.at)
   local sel = state.cursor - e.at + 1
   if sel < 1 or sel > #segs then sel = nil end
-  W.envelope(x + 2, y + 9, (#segs * CW) - 6, 9, segs, sel)
+  -- the shape lifts on the trigger and falls back, so the page has a pulse
+  -- while the sequencer is running
+  local hot = 0
+  if track.last_trig then
+    hot = util.clamp(1 - ((now - track.last_trig) / PULSE), 0, 1)
+    if hot > 0 then P.anim = true end
+  end
+  W.envelope(x + 2, y + 9, (#segs * CW) - 6, 9, segs, sel, hot)
   return e.at, e.at + #segs - 1
 end
 
@@ -168,12 +185,12 @@ local function draw_footer(track)
   local len = sq:length()
   local w = 128 / len
   local head = sq:playhead()
-  local bar = sq:bar_steps()
+  local mark = sq:mark_steps()
   for i = 1, len do
     local st = sq:disp_step(i)
     local on = st and st.on
     local lv = 1
-    if ((i - 1) % bar) == 0 then lv = 3 end
+    if ((i - 1) % mark) == 0 then lv = 3 end
     if on then lv = 6 end
     if i == head then lv = 15 end
     screen.level(lv)
@@ -329,7 +346,12 @@ local function draw_master_params(state, pg)
     screen.move(x + 2, y + 6)
     screen.text(e.name)
 
-    W.draw(e.g or "bar", x + 2, y + 9, CW - 6, 9, pseudo, M.norm(e), sel and 15 or 9)
+    local extra = M.glyph_extra(e) or {}
+    extra.now = now
+    extra.live = sel and LIVE[e.g] or false
+    if extra.live then P.anim = true end
+    W.draw(e.g or "bar", x + 2, y + 9, CW - 6, 9, pseudo, M.norm(e),
+      sel and 15 or 9, extra)
 
     screen.level(sel and 15 or 6)
     screen.move(x + 2, y + 24)
@@ -347,6 +369,7 @@ end
 
 function P.redraw(state)
   P.anim = false
+  now = util.time()
   screen.clear()
   screen.font_face(1)
   screen.font_size(8)

@@ -4,7 +4,7 @@
 --
 -- E1 track   E2 cursor   E3 value
 -- K1 shift   K2 page back   K3 page forward   (pages do not wrap)
--- K2+K3 master: its own pages -- OVER PERFORM MIX COLOUR CLOCK and the sends
+-- K2+K3 master: its own pages -- OVER PERFORM MIX COLOUR SONG and the sends
 --
 -- K1+E2 jump pages   K1+E3 coarse   K1+K3 play/stop   K1+K2 reset
 -- hold grid steps and turn E3 to lock a parameter to all of them
@@ -38,7 +38,13 @@ local function build_params()
     local g = M.groups[key]
     params:add_group("master_" .. key, g.name, #g.p)
     for _, e in ipairs(g.p) do
-      params:add_control(e.param, e.name, e.spec)
+      -- an option param (the key's ROOT and SCALE) has a list rather than a
+      -- controlspec; everything else is a control
+      if e.opts then
+        params:add_option(e.param, e.name, e.opts, e.def or 1)
+      else
+        params:add_control(e.param, e.name, e.spec)
+      end
       params:set_action(e.param, function(v) g.send(e, v) end)
     end
   end
