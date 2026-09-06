@@ -24,7 +24,7 @@ parameter locks are exact.
 | **KICK** | Sine body, pitch drop, one modulator, a click on top. `TUNE SWEEP S.TIME DECAY FM RATIO CLICK PUNCH`. **Defaults are an 808 kick** at 49 Hz. |
 | **SNARE** | Two FM tones a fifth-and-a-bit apart for the shell, filtered noise for the wires, `SNAP` between them. `TUNE SNAP FM RATIO B.DEC N.DEC N.TONE CRACK` |
 | **HAT** | Six partials cross-modulated by a seventh through a resonant high band — the 808's oscillator cluster done in FM. `TUNE SPREAD FM DECAY TONE RES NOISE OPEN` |
-| **TOM** | A kick that keeps its pitch: shallower, slower bend, a skin transient, and `WOOD` ringing a shell around it. `TUNE BEND B.TIME DECAY FM RATIO SKIN WOOD` |
+| **TOM** | A kick that keeps its pitch: a skin transient at the front and `WOOD` ringing a shell around it. `BEND` reaches as far as the kick's `SWEEP`; the default sits half an octave in. `TUNE BEND B.TIME DECAY FM RATIO SKIN WOOD` |
 | **CYMB** | The hat's cluster taken long and dense, with `SWELL` running the attack backwards for a reverse crash. `TUNE SPREAD FM DECAY TONE SIZZLE SWELL DIRT` |
 | **TONE** | Four-operator FM using the YMF262 (OPL3) waveform set, with the chip's own frequency multipliers, 6-bit operator levels and 3-bit feedback. Two ADSR envelopes, either of which can cycle, and the mod EG has **two destinations**. Every parameter is read live, so a note already sounding follows what you turn. Sixteen voices a track, oldest-first stealing. |
 
@@ -98,8 +98,9 @@ Some of what that gets you:
 - **`SWEEP` and `S.TIME` are one glide between them.** `SWEEP` puts the
   settled note where the excursion has room to show — low for a pitch falling
   onto it, high for one rising — with the dotted line at the far edge as full
-  depth. `S.TIME` is the same glide with the stretch of time it takes marked
-  underneath, so it is a duration rather than a second amplitude curve.
+  depth, four octaves. The line is straight because the glide is. `S.TIME` is
+  the same glide with the stretch of time it takes marked underneath, so it is
+  a duration rather than a second amplitude curve.
 - **an enum is drawn as its choices**: one slot a value, the one selected
   standing up out of the row, so `MULT`, `MODE`, `CYCLE`, `FOLLOW`, `LEADER`,
   `INVERT` and the rest all read as "third of eight" without counting.
@@ -466,12 +467,17 @@ whether a held TONE note follows a ratio turned under it. A control that looks
 like a control and does nothing is exactly what this exists to catch.
 
 The kick's `SWEEP` and `S.TIME` were caught by it twice. The check passing is
-not the same as the pair being worth turning: the time ran 2ms to 600ms on an
+not the same as the pair doing what it says: the time ran 2ms to 600ms on an
 exponential, so the whole bottom half of `S.TIME` was under 20ms — one cycle at
 the pitch a kick lands on, heard as a click rather than as a pitch moving — and
-the depth reached four octaves, so the downward half of `SWEEP` started at 3 Hz
-and the front of the hit was simply missing. It is 10ms to 1.2s over three
-octaves now, and both halves of both knobs do something across their travel.
+the pitch envelope was exponential too, which meant the drop was over in the
+first tenth of whatever `S.TIME` claimed. The law is plain now, and it is the
+same for the tom's `BEND`: the control is an offset in octaves, full right is
+four octaves over the tuned pitch and full left is four under, and the glide
+is linear in octaves over `S.TIME` — 10ms to one second — so the pitch arrives
+on the note exactly when the time is up and every part of both knobs moves it.
+It is a multiplier on whatever `TUNE` settled on, so the interval is the same
+at every note and the scale has nothing to do with it.
 
 ```bash
 lua tools/render-screen.lua preview   # then open preview/index.html

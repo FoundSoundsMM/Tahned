@@ -41,8 +41,8 @@ def crossings(s, sr, t0, t1):
     The body is a sine at these settings, so crossings are the cleanest
     pitch estimate available without a transform. Counting them over a
     window that spans the sweep is also the only honest way to see the
-    sweep at all: it is over in 40ms, which is barely two cycles at the
-    pitch it lands on.
+    sweep at all: at the default S.TIME it is over in 140ms, which is
+    only a handful of cycles at the pitch it lands on.
     """
     a, b = int(t0 * sr), min(int(t1 * sr), len(s))
     seg = s[a:b]
@@ -174,7 +174,8 @@ for tag, (clo, chi), (tlo, thi) in DRUMS:
 
 # ------------------------------------------------------------------- kick
 # The 808 is the one that has a right answer: TUNE at -5 semitones off the
-# trigger note is 49 Hz, and SWEEP starts it two octaves over that. The pitch
+# trigger note is 49 Hz, and SWEEP starts it an octave and a half over that at
+# the default -- full right is four octaves over. The pitch
 # window has to sit inside the body -- past a couple of hundred milliseconds
 # the kick is already gone, and crossings of what is left mean nothing.
 print()
@@ -182,8 +183,8 @@ d, f = load("kick-body"), load("kick-bodyflat")
 if d and f:
     dsr, ds = d
     fsr, fs = f
-    # "Settled" has to start after the glide is over. S.TIME reaches 1.2s and
-    # sits at ~150ms by default, so a window opening at 50ms is still measuring
+    # "Settled" has to start after the glide is over. S.TIME reaches 1s and
+    # sits at ~140ms by default, so a window opening at 50ms is still measuring
     # the sweep; 0.25..0.45s is past it and still well inside the body, which
     # runs about 0.6s at the decay this ships with.
     dlate, flate = f0(ds, dsr, 0.25, 0.45), f0(fs, fsr, 0.25, 0.45)

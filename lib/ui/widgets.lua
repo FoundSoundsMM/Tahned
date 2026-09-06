@@ -424,13 +424,11 @@ end
 
 -- ---------------------------------------------------------------- pitch
 --
--- SC's Env curve, a1 -> a2 over t in 0..1:
---   a1 + (a2 - a1) * (1 - exp(t*c)) / (1 - exp(c))
--- with a1 = 1, a2 = 0, c = -2.5, matching the kick and the tom.
-local SWP_C   = -2.5
-local SWP_DEN = 1 - math.exp(SWP_C)
+-- The pitch glide is linear in octaves over its time, so the line is
+-- straight. It was drawn as an exponential to match the engine's old -2.5
+-- curve; both are straight now, and the drawing is the plainer for it.
 local function swp_env(t)
-  return 1 - ((1 - math.exp(SWP_C * t)) / SWP_DEN)
+  return 1 - t
 end
 
 -- How far off the settled note the pitch starts, and which way.
@@ -439,8 +437,11 @@ end
 -- that leaves the most room for the excursion -- low for a pitch falling
 -- onto it, high for one rising -- rather than down the middle with four
 -- pixels either side, which is what made a half-depth sweep look flat. The
--- dotted line at the far edge is full depth, so a small excursion reads as a
--- small part of what is there rather than as a line leaning slightly.
+-- dotted line at the far edge is full depth -- four octaves -- so a small
+-- excursion reads as a small part of what is there rather than as a line
+-- leaning slightly. The height is the root of the value rather than the
+-- value: six pixels cannot hold four octaves linearly and still show the
+-- shallow end of the control moving at all.
 function W.sweep(x, y, w, h, sp, v, lv)
   local p = (pos(sp, v) * 2) - 1
   local mag = math.sqrt(math.abs(p))

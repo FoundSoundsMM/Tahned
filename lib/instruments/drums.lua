@@ -21,8 +21,10 @@ local kick = {
   id = "kick", name = "KICK", short = "KCK", seq = "drum",
   pages = { { name = "SYNTH", params = {
     S.c(8,  "TUNE",   { min = -24, max = 24, def = -5, g = "tune", unit = "st" }),
-    S.b(9,  "SWEEP",  { def = 31, g = "sweep" }),
-    S.c(10, "S.TIME", { def = 72, g = "ptime" }), -- ~150ms: an 808 glide
+    -- SWEEP is octaves off the tuned pitch: +-63 is +-4, so 23 is the
+    -- octave and a half the stock kick already had. S.TIME is 10ms..1s.
+    S.b(9,  "SWEEP",  { def = 23, g = "sweep" }),
+    S.c(10, "S.TIME", { def = 72, g = "ptime" }), -- ~140ms: an 808 glide
     S.c(11, "DECAY",  { def = 85, g = "rel" }),
     S.c(12, "FM",     { def = 0, g = "fm" }),
     S.e(13, "RATIO",  S.RATIOS, { def = 3, g = "ratio" }),
@@ -73,7 +75,7 @@ local tom = {
   id = "tom", name = "TOM", short = "TOM", seq = "drum",
   pages = { { name = "SYNTH", params = {
     S.c(8,  "TUNE",   { min = -24, max = 24, def = 7, g = "tune", unit = "st" }),
-    S.b(9,  "BEND",   { def = 25, g = "sweep" }),
+    S.b(9,  "BEND",   { def = 8,  g = "sweep" }),  -- half an octave; the range is the kick's
     S.c(10, "B.TIME", { def = 45, g = "ptime" }),
     S.c(11, "DECAY",  { def = 75, g = "rel" }),
     S.c(12, "FM",     { def = 18, g = "fm" }),

@@ -247,7 +247,7 @@ Engine_Tahned : CroneEngine {
 				var g = Latch.kr(In.kr(gbus, 8), Impulse.kr(0));
 				var tune = p[8].linlin(0, 1, -24, 24) + (g[0] * 24);
 				var sdep = (p[9] * 2) - 1;
-				var stim = p[10].linexp(0, 1, 0.01, 1.2) * (2 ** (g[2] * 2));
+				var stim = (p[10].linexp(0, 1, 0.01, 1) * (2 ** (g[2] * 2))).clip(0.001, 1);
 				var dec  = p[11].linexp(0, 1, 0.02, 4) * (2 ** (g[2] * 3));
 				var idx  = p[12] * (2 ** (g[3] * 2));
 				var rt   = Select.kr(p[13].round.clip(0, 15), rat);
@@ -256,18 +256,17 @@ Engine_Tahned : CroneEngine {
 				var atk  = 0.0008 * (2 ** (g[1] * 4));
 				var base = (note + tune).midicps;
 				// The drop, and it is the whole of what makes a kick a kick.
-				// Two things had to be true before either control was worth
-				// turning. The time has to reach far enough to be heard as a
-				// pitch moving rather than as a click: over 0.002..0.6 the
-				// bottom half of S.TIME was all under 20ms, which is one cycle
-				// at the pitch a kick lands on, so most of the knob did
-				// nothing. And the depth has to stay inside the audio band --
-				// at four octaves the downward half started at 3Hz and the
-				// front of the hit was simply missing, which is the other way
-				// a control looks inert. Three octaves off a 49Hz fundamental
-				// still reaches 390Hz, which is as far up as a kick wants.
-				var swp  = EnvGen.ar(Env([1, 0], [stim], [-2.5]));
-				var f    = base * (2 ** (swp * sdep * 3));
+				// SWEEP is an offset in octaves and nothing else: full right
+				// starts four octaves over whatever TUNE settled on and glides
+				// down onto it, full left starts four octaves under and climbs.
+				// It is a multiplier on the tuned pitch, so the excursion is
+				// the same interval at every note and owes nothing to the
+				// scale. S.TIME is how long that takes, up to one second, and
+				// the glide is linear in octaves so it uses all of it -- an
+				// exponential curve here was over in the first tenth and made
+				// the back half of S.TIME do nothing.
+				var swp  = EnvGen.ar(Env([1, 0], [stim], \lin));
+				var f    = base * (2 ** (swp * sdep * 4));
 				var mod, body, amp, click, sig;
 
 				mod  = Engine_Tahned.sop(f * rt) * idx;
@@ -381,7 +380,7 @@ Engine_Tahned : CroneEngine {
 				var g = Latch.kr(In.kr(gbus, 8), Impulse.kr(0));
 				var tune = p[8].linlin(0, 1, -24, 24) + (g[0] * 24);
 				var bend = (p[9] * 2) - 1;
-				var btim = p[10].linexp(0, 1, 0.01, 1.2) * (2 ** (g[2] * 2));
+				var btim = (p[10].linexp(0, 1, 0.01, 1) * (2 ** (g[2] * 2))).clip(0.001, 1);
 				var dec  = p[11].linexp(0, 1, 0.03, 3) * (2 ** (g[2] * 3));
 				var idx  = p[12] * 3 * (2 ** (g[3] * 2));
 				var rt   = Select.kr(p[13].round.clip(0, 15), rat);
@@ -389,12 +388,14 @@ Engine_Tahned : CroneEngine {
 				var wood = p[15];
 				var atk  = 0.0008 * (2 ** (g[1] * 4));
 				var f0   = (note + tune + 7).midicps;
-				// a tom bends about a fifth, not two octaves; the shallower
-				// range is what keeps it a tom as the control is opened up.
-				// Same curve as the kick, and for the same reason: at -4 the
-				// bend was over long before B.TIME said it was.
-				var swp  = EnvGen.ar(Env([1, 0], [btim], [-2.5]));
-				var f    = f0 * (2 ** (swp * bend * 1.2));
+				// Same law as the kick's SWEEP: full right starts four
+				// octaves above the tuned pitch and glides down onto it, full
+				// left starts four octaves below and climbs, linear in octaves
+				// over B.TIME so the whole of the time is audible as movement.
+				// A tom is normally worked in the bottom third of the control,
+				// but the range it can reach is the kick's.
+				var swp  = EnvGen.ar(Env([1, 0], [btim], \lin));
+				var f    = f0 * (2 ** (swp * bend * 4));
 				var mod, body, amp, hit, shell, sig;
 
 				mod  = Engine_Tahned.sop(f * rt) * idx;
